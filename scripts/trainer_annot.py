@@ -39,12 +39,15 @@ def calculate_pip(M,bp):
     """Calculate posterior inclusion probabilities.
     """
     pip = np.zeros(bp)
-    tot = 0
+    tot = 0.0
     for k in M:
-        tot+= M[k]
+        val = float(np.asarray(M[k]).squeeze())
+        tot += val
         for i in k:
-            pip[i]+= M[k]
-            
+            pip[i] += val
+
+    if tot <= 0:
+        return pip
     return np.squeeze(pip/tot)
 
 def make_gif(M, bp, loc, store, ep):
@@ -85,10 +88,12 @@ def regularize_ld(LD):
     
     
 def reformat_memo(memo, p0):
-    memo[tuple([])] = np.array([[torch.sum(torch.log(1-p0)).data.numpy()]])
-    m0 = np.mean([val for val in memo.values()])
+    memo[tuple([])] = float(torch.sum(torch.log(1 - p0)).item())
+    m0 = float(np.mean([float(np.asarray(val).squeeze()) for val in memo.values()]))
     for key in memo:
-        memo[key] = min(10**15,np.exp(min(np.log(10**15),memo[key]-m0)))
+        val = float(np.asarray(memo[key]).squeeze())
+        memo[key] = float(min(10**15, np.exp(min(np.log(10**15), val - m0))))
+    return m0
     return m0
 
 class network(nn.Module):
@@ -425,7 +430,7 @@ class finemapper():
             res =  -torch.logdet(sigma)/2 + sigma2 + torch.sum(torch.log(prior)) 
         
         
-            memo[ind_m] = cpu(res).data.numpy()
+            memo[ind_m] = float(cpu(res).data.numpy())
         
             return res
         else:
@@ -561,7 +566,7 @@ class finemapper_lassonet():
             prior[ind] = p0[ind]
 
             res = -torch.logdet(sigma) / 2 + sigma2 + torch.sum(torch.log(prior))
-            memo[ind_m] = cpu(res).data.numpy()
+            memo[ind_m] = float(cpu(res).data.numpy())
 
             return res
         else:
@@ -713,7 +718,7 @@ class finemapper_annot():
             res =  -torch.logdet(sigma)/2 + sigma2 + torch.sum(torch.log(prior)) 
         
         
-            memo[ind_m] = cpu(res).data.numpy()
+            memo[ind_m] = float(cpu(res).data.numpy())
         
             return res
         else:

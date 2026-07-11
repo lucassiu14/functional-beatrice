@@ -216,7 +216,7 @@ def abf( z, ld, memo, mean_memo, n_sub, sigma_sq, p0, ind, S):
         res =  min(torch.tensor(10**15),torch.exp(min(torch.log(torch.tensor(10**15)),ex)))
     
     
-        memo[ind_m] = cpu(res).data.numpy()
+        memo[ind_m] = float(cpu(res).data.numpy())
     
         return res
     else:
@@ -272,15 +272,18 @@ def change(memo, mean_memo, z, ld, n_sub, sigma_sq, p0, S, st_Set,search_set):
         return          
     
 def calculate_pip(memo,bp):
-    
+
     pip = np.zeros(bp)
-    tot = 0
+    tot = 0.0
     for k in memo:
-        tot+= memo[k]
+        val = float(np.asarray(memo[k]).squeeze())
+        tot += val
         for i in k:
-            pip[i]+= memo[k]
-            
-    return np.squeeze(pip/tot)    
+            pip[i] += val
+
+    if tot <= 0:
+        return pip
+    return np.squeeze(pip/tot)
 
 
 def regularize_ld(LD):
