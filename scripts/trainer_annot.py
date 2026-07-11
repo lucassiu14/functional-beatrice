@@ -284,11 +284,22 @@ class LassoNetPrior(nn.Module):
 
     def compute_feature_importance(self):
         """
-        Compute feature importance as L2 norm of skip weights for each feature.
-        Returns tensor of shape (m,) with importance score for each annotation.
+        Compute feature importance from the identifiable logit contrast.
+
+        The two-output softmax parameterisation is invariant to adding the same
+        annotation-dependent function to both logits: softmax(out + c) ==
+        softmax(out), so the causal probability imp_o is unchanged. However
+        the naive L2-norm importance ||theta_j||_2 IS affected by that shift,
+        making it non-identifiable from the causal probability. The identifiable
+        quantity is the logit contrast delta_j = theta[j, 1] - theta[j, 0];
+        its magnitude reports how much annotation j moves the log-odds of the
+        causal class, independent of any common shift.
+
+        Returns tensor of shape (m,).
         """
-        theta = self.get_skip_weights()  # (m, 2)
-        importance = torch.norm(theta, p=2, dim=1)  # L2 norm across output dims
+        theta = self.get_skip_weights()          # (m, 2)
+        contrast = theta[:, 1] - theta[:, 0]     # identifiable logit contrast
+        importance = torch.abs(contrast)         # magnitude of contribution
         self.feature_importance = importance.detach().cpu().numpy()
         return importance
 
