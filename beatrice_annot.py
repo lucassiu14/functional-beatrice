@@ -148,23 +148,41 @@ def run_beatrice_annot(beatrice_args: dict):
 
 
 def main(argv):
+    # Forward every declared CLI flag into args. Previously the dict here
+    # omitted max_iter / gamma_coverage / plot_loss / get_cred / gamma /
+    # sparse_concrete-etc so those CLI flags were silently ignored and the
+    # run_beatrice_annot() defaults kicked in (e.g. max_iter=2000 was used
+    # even when --max_iter 500 was passed). That made every fit ~4x longer
+    # than intended and caused CPU-time kills on shared / login nodes.
     args = {
-        "z": FLAGS.z,
-        "LD": FLAGS.LD,
-        "annot": FLAGS.annot,
-        "N": FLAGS.N,
-        "target": FLAGS.target,
-        'prior_neural_network': FLAGS.prior_neural_network,
-        'prior_regularisation': FLAGS.prior_regularisation,
-        'MCMC_samples': FLAGS.MCMC_samples,
-        'n_caus': FLAGS.n_caus,
-        'neural_network': FLAGS.neural_network,
-        'sparse_concrete': FLAGS.sparse_concrete,
-        'prior_weights': FLAGS.prior_weights,
-        'return_weights': FLAGS.return_weights,
-        'lambda_l1': FLAGS.lambda_l1,
-        'hierarchy_M': FLAGS.hierarchy_M,
-        'sigma_sq': FLAGS.sigma_sq,
+        "z":                    FLAGS.z,
+        "LD":                   FLAGS.LD,
+        "annot":                FLAGS.annot,
+        "N":                    FLAGS.N,
+        "target":               FLAGS.target,
+        "prior_location":       FLAGS.prior_location,
+        "MCMC_samples":         FLAGS.MCMC_samples,
+        "max_iter":             FLAGS.max_iter,
+        "plot_loss":            FLAGS.plot_loss,
+        "allow_dup":            FLAGS.allow_dup,
+        "get_cred":             FLAGS.get_cred,
+        "gamma":                FLAGS.gamma,
+        "gamma_key":            FLAGS.gamma_key,
+        "gamma_coverage":       FLAGS.gamma_coverage,
+        "gamma_selection":      FLAGS.gamma_selection,
+        "sigma_sq":             FLAGS.sigma_sq,
+        "temp_lower_bound":     FLAGS.temp_lower_bound,
+        "sparse_concrete":      FLAGS.sparse_concrete,
+        "n_caus":               FLAGS.n_caus,
+        "true_loc":             FLAGS.true_loc,
+        "purity":               FLAGS.purity,
+        "neural_network":       FLAGS.neural_network,
+        "prior_neural_network": FLAGS.prior_neural_network,
+        "prior_regularisation": FLAGS.prior_regularisation,
+        "prior_weights":        FLAGS.prior_weights,
+        "return_weights":       FLAGS.return_weights,
+        "lambda_l1":            FLAGS.lambda_l1,
+        "hierarchy_M":          FLAGS.hierarchy_M,
     }
     run_beatrice_annot(args)
 
