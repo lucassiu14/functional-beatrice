@@ -216,7 +216,7 @@ def abf( z, ld, memo, mean_memo, n_sub, sigma_sq, p0, ind, S):
         res =  min(torch.tensor(10**15),torch.exp(min(torch.log(torch.tensor(10**15)),ex)))
     
     
-        memo[ind_m] = float(cpu(res).data.numpy())
+        memo[ind_m] = float(res.detach().cpu().numpy().squeeze())
     
         return res
     else:

@@ -441,7 +441,7 @@ class finemapper():
             res =  -torch.logdet(sigma)/2 + sigma2 + torch.sum(torch.log(prior)) 
         
         
-            memo[ind_m] = float(cpu(res).data.numpy())
+            memo[ind_m] = float(res.detach().cpu().numpy().squeeze())
         
             return res
         else:
@@ -577,7 +577,7 @@ class finemapper_lassonet():
             prior[ind] = p0[ind]
 
             res = -torch.logdet(sigma) / 2 + sigma2 + torch.sum(torch.log(prior))
-            memo[ind_m] = float(cpu(res).data.numpy())
+            memo[ind_m] = float(res.detach().cpu().numpy().squeeze())
 
             return res
         else:
@@ -729,7 +729,7 @@ class finemapper_annot():
             res =  -torch.logdet(sigma)/2 + sigma2 + torch.sum(torch.log(prior)) 
         
         
-            memo[ind_m] = float(cpu(res).data.numpy())
+            memo[ind_m] = float(res.detach().cpu().numpy().squeeze())
         
             return res
         else:
