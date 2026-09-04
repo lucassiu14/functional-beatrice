@@ -83,14 +83,15 @@ class LinearPrior(nn.Module):
         u = (-torch.log(-torch.log(rand_like_hostrng(alpha) + 1e-10) + 1e-10) + alpha) / t
         return torch.nn.functional.softmax(u, dim=1)
 
-    def forward(self, X, T, samples):
+    def forward(self, X, T, samples, p0_only=False):
         eps = 1e-7
         out = self.skip(X)                       # (bp, 2)
         imp = torch.exp(out)
         imp_o = imp[:, 1] / (torch.sum(imp, dim=1) + eps)
-        self.imp = imp_o.detach().cpu().numpy()
-        self.compute_feature_importance()
-        if self.training:
+        if not p0_only:                          # both lines are device syncs
+            self.imp = imp_o.detach().cpu().numpy()
+            self.compute_feature_importance()
+        if self.training and not p0_only:
             z_N = self.gumbel(torch.log(imp.repeat(samples, 1) + eps), T)
             bin_concrete = z_N[:, 1].reshape(samples, len(imp_o))
             return bin_concrete, None, None, imp_o
@@ -154,15 +155,20 @@ def _abf(S, z, ld, memo, n_sub, sigma_sq, cc, p0, K_C, eps):
     return None
 
 
-def _region_elbo(model, prior_head, S, Z, LD, v, temp, n_samples, sigma_sq,
+def _region_elbo(model, p_0, S, Z, LD, temp, n_samples, sigma_sq,
                  n_sub, K_C, gamma, lambda_reg, memo):
     """One region's differentiable loss (lik + kl + reg), populating `memo`.
     Mirrors finemapper_lassonet.train's inner body; NO optimiser step here - the
-    joint loop sums these across regions and steps ONCE."""
+    joint loop sums these across regions and steps ONCE.
+
+    `p_0` is this region's slice of the SHARED prior head's output. The head is
+    now evaluated ONCE per optimiser step on every region's annotations
+    concatenated (see run_joint), rather than once per region: LassoNetPrior is
+    purely per-variant - every reduction in it is over the 2-logit axis, none
+    over the variant axis - so concatenating is exact and needs no padding."""
     eps = gpu_ts(1e-7)
     M = len(Z)
     c, c1, c2, imp = model(temp, n_samples)          # region posterior psi_r
-    _, _, _, p_0 = prior_head(v, temp, 1)            # SHARED prior phi -> p0_r
 
     loss = gpu_ts(0.0)
     lik_loss = gpu_ts(0.0)
@@ -178,7 +184,14 @@ def _region_elbo(model, prior_head, S, Z, LD, v, temp, n_samples, sigma_sq,
         K_C_eff = ind.numel()
         cc = c[i]
         if gamma > 0:
-            _abf(S, Zc, LD, memo, n_sub, sigma_sq, cc, p_0, K_C_eff, gamma)
+            # _abf's return value is DISCARDED - it runs purely to populate
+            # `memo`, which is read after training by reformat_memo /
+            # calculate_pip. It therefore contributes nothing to the gradient,
+            # yet without no_grad it builds an autograd graph on every one of
+            # its ~15,000 calls per scenario. The memo entry is already
+            # detached, so this is numerically identical.
+            with torch.no_grad():
+                _abf(S, Zc, LD, memo, n_sub, sigma_sq, cc, p_0, K_C_eff, gamma)
         # Contracted Woodbury: no m_r x m_r matrix is formed. sigma_inv here
         # carries the identity term, so the quadratic form is
         #   z^T (I - U inv V) s = z^T s - (z^T U) inv (V s).
@@ -282,6 +295,16 @@ def run_joint(options):
                         memo={}, bp=len(Z), N=rc['N'], target=rc['target'],
                         z=rc['z'], LD_path=rc['LD']))
 
+    # --- annotations of every region, concatenated ONCE ----------------------
+    # The shared head is applied per variant, so evaluating it on the stacked
+    # (sum_r m_r, d) matrix and slicing gives exactly the same p_0 as calling it
+    # per region, with one dispatch per step instead of R. `offs` holds the
+    # split points.
+    v_all = torch.cat([r['v'] for r in reg], dim=0)
+    offs, _acc = [], 0
+    for r in reg:
+        offs.append((_acc, _acc + r['bp'])); _acc += r['bp']
+
     # --- ONE shared prior head phi ------------------------------------------
     if options['prior_head'] == 'linear':
         prior_head = gpu(LinearPrior(m=m_annots))
@@ -309,10 +332,13 @@ def run_joint(options):
         temp = torch.max(temp_lb, gpu_ts(np.exp(-0.0001 * n)))
         opt.zero_grad()
         total = gpu_ts(0.0)
-        for r in reg:
+        # ONE evaluation of the shared head for the whole scenario, then slice.
+        _, _, _, p0_all = prior_head(v_all, temp, 1, p0_only=True)
+        for i, r in enumerate(reg):
             K_C = min(r['bp'], options['sparse_concrete'])
+            lo, hi = offs[i]
             region_loss, _ = _region_elbo(
-                r['model'], prior_head, r['S'], r['Z'], r['LD'], r['v'],
+                r['model'], p0_all[lo:hi], r['S'], r['Z'], r['LD'],
                 temp, n_samples, gpu_ts(sigma_sq), r['N'], K_C, gamma,
                 lambda_reg, r['memo'])
             total = total + region_loss / R          # EQUAL weight per region

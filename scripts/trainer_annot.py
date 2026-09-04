@@ -362,7 +362,7 @@ class LassoNetPrior(nn.Module):
         u = (-torch.log(-torch.log(rand_like_hostrng(alpha) + 1e-10) + 1e-10) + alpha) / t
         return F.softmax(u, dim=1)
 
-    def forward(self, X, T, samples):
+    def forward(self, X, T, samples, p0_only=False):
         """
         Forward pass through LassoNet.
 
@@ -389,12 +389,20 @@ class LassoNetPrior(nn.Module):
         # Convert to probabilities
         imp = torch.exp(out)
         imp_o = imp[:, 1] / (torch.sum(imp, dim=1) + eps)
-        self.imp = imp_o.detach().cpu().numpy()
+        # Both lines below are device->host transfers, i.e. hard sync points.
+        # Under p0_only they run 1500 times a scenario instead of 15000, and
+        # neither result is used during training: run_joint's final pass calls
+        # this head again in eval mode (p0_only=False) to populate
+        # feature_importance for the CSV.
+        if not p0_only:
+            self.imp = imp_o.detach().cpu().numpy()
+            self.compute_feature_importance()
 
-        # Update feature importance
-        self.compute_feature_importance()
-
-        if self.training:
+        # p0_only: the joint trainer uses ONLY imp_o (= p_0) and discards the
+        # three Binary Concrete draws below, so drawing them is 45,000 wasted
+        # dispatches per ten-region scenario. Default False keeps the
+        # single-locus path (functional_beatrice) bit-identical.
+        if self.training and not p0_only:
             z_N = self.gumbel(torch.log(imp.repeat(samples, 1) + eps), T)
             z_N1 = self.gumbel(torch.log(imp.repeat(1, 1) + eps), T)
             z_N2 = self.gumbel(torch.log(imp.repeat(1, 1) + eps), T)
