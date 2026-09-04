@@ -10,6 +10,7 @@ from scripts.convert_to_gpu import gpu
 from scripts.convert_to_gpu_and_tensor import gpu_t
 from scripts.convert_to_gpu_scalar import gpu_ts
 from scripts.convert_to_cpu import cpu
+from scripts.device import rand_like_hostrng
 import matplotlib.pyplot as plt
 import pickle
 import torch.nn.functional as F
@@ -193,7 +194,7 @@ class priornetwork(nn.Module):
 
     def gumbel(self, alpha, t):
         """ Generate Binary Concrete Vectors. """
-        u = (-torch.log(-torch.log(torch.rand_like(alpha))) + alpha) / t
+        u = (-torch.log(-torch.log(rand_like_hostrng(alpha))) + alpha) / t
         return F.softmax(u, dim=1)
 
     def forward(self, X, T, samples):
@@ -355,7 +356,7 @@ class LassoNetPrior(nn.Module):
 
     def gumbel(self, alpha, t):
         """Generate Binary Concrete Vectors."""
-        u = (-torch.log(-torch.log(torch.rand_like(alpha) + 1e-10) + 1e-10) + alpha) / t
+        u = (-torch.log(-torch.log(rand_like_hostrng(alpha) + 1e-10) + 1e-10) + alpha) / t
         return F.softmax(u, dim=1)
 
     def forward(self, X, T, samples):

@@ -42,6 +42,7 @@ from scripts.convert_to_gpu import gpu
 from scripts.convert_to_gpu_and_tensor import gpu_t
 from scripts.convert_to_gpu_scalar import gpu_ts
 from scripts.convert_to_cpu import cpu
+from scripts.device import rand_like_hostrng, device_report
 from scripts.trainer_annot import (
     network, LassoNetPrior, regularize_ld, calculate_pip, reformat_memo,
     save_object,
@@ -79,7 +80,7 @@ class LinearPrior(nn.Module):
         return gpu_ts(0.0)
 
     def gumbel(self, alpha, t):
-        u = (-torch.log(-torch.log(torch.rand_like(alpha) + 1e-10) + 1e-10) + alpha) / t
+        u = (-torch.log(-torch.log(rand_like_hostrng(alpha) + 1e-10) + 1e-10) + alpha) / t
         return torch.nn.functional.softmax(u, dim=1)
 
     def forward(self, X, T, samples):
@@ -260,6 +261,7 @@ def run_joint(options):
         prior_head = gpu(LassoNetPrior(m=m_annots, hidden_dims=prior_hidden, M=hierarchy_M))
         head_desc = f"LassoNetPrior (idea #2: shared, hidden={prior_hidden}, M={hierarchy_M})"
     print(f"[joint] {R} regions, {m_annots} annotations, head={head_desc}")
+    print(f"[joint] {device_report()}")
 
     # --- ONE optimiser over all region posteriors + the shared prior --------
     params = list(prior_head.parameters())
@@ -303,6 +305,23 @@ def run_joint(options):
                'feature_importance': prior_head.feature_importance}
         os.makedirs(r['target'], exist_ok=True)
         save_object(res, os.path.join(r['target'], 'res'))
+
+        # Annotation importance for the SHARED head. Identical for every region
+        # by construction (one head across all R), but written into each
+        # region's target so the per-region wrapper parser picks it up without
+        # needing to know about the joint layout. Same schema as the
+        # single-locus path in trainer_annot.py so downstream analysis code
+        # (wrapper -> extract_aux.R -> iter004_annotation_recovery.R) is
+        # unchanged. Before this, the joint head's importances were computed and
+        # then discarded with the wrapper's tempfile work_dir.
+        if prior_head.feature_importance is not None:
+            fi_df = pd.DataFrame({
+                'annotation_index': range(len(prior_head.feature_importance)),
+                'importance': prior_head.feature_importance
+            })
+            fi_df = fi_df.sort_values('importance', ascending=False)
+            fi_df.to_csv(os.path.join(r['target'], 'feature_importance.csv'),
+                         index=False)
         gen_opts = {
             'z': r['z'], 'LD': r['LD_path'], 'prior_location': '',
             'sigma_sq': sigma_sq, 'n_sub': r['N'], 'target': r['target'],
