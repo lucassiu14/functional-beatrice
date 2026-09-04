@@ -290,7 +290,9 @@ def run_joint(options):
             raise ValueError(f"annotation count differs across regions: "
                              f"{v.shape[1]} vs {m_annots}")
         model = gpu(network(len(Z), [1] + NN, 3, LD, Z))
-        S = torch.matmul(torch.inverse(LD), Z.unsqueeze(1))
+        # solve(A, b) rather than inverse(A) @ b: same result, ~3x fewer flops
+        # and better conditioned.
+        S = torch.linalg.solve(LD, Z.unsqueeze(1))
         reg.append(dict(names=names, Z=Z, LD=LD, v=v, model=model, S=S,
                         memo={}, bp=len(Z), N=rc['N'], target=rc['target'],
                         z=rc['z'], LD_path=rc['LD']))
@@ -381,6 +383,10 @@ def run_joint(options):
             'z': r['z'], 'LD': r['LD_path'], 'prior_location': '',
             'sigma_sq': sigma_sq, 'n_sub': r['N'], 'target': r['target'],
             'names': r['names'], 'key_thres': options['key_thres'],
+            # hand over what we already hold: saves a second text parse of the
+            # LD matrix, a second eigendecomposition and a second m_r x m_r
+            # solve, per region.
+            'Z_t': r['Z'], 'LD_t': r['LD'], 'S_t': r['S'],
             'n_causal': options['n_causal'], 'allow_duplicates': options['allow_duplicates'],
             'coverage_ths': options['coverage_ths'], 'selection_prob': options['selection_prob'],
             'purity': options.get('purity', 0.0),
