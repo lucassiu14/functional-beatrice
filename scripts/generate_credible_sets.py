@@ -1,3 +1,4 @@
+import math
 import torch
 import numpy as np
 import matplotlib
@@ -217,7 +218,14 @@ def abf( z, ld, memo, mean_memo, n_sub, sigma_sq, p0, ind, S):
         prior = 1 - p0
         prior[ind] = p0[ind]
         ex = -torch.logdet(sigma)/2 + sigma2 + torch.sum(torch.log(prior)) - mean_memo
-        res =  min(torch.tensor(10**15),torch.exp(min(torch.log(torch.tensor(10**15)),ex)))
+        # Was: min(torch.tensor(1e15), torch.exp(min(torch.log(torch.tensor(1e15)), ex)))
+        # Python's min() on two tensors does an element-wise comparison, and
+        # those literals build CPU 0-dim tensors while `ex` may live on an
+        # accelerator. clamp expresses the same ceiling with no cross-device
+        # comparison and no host scalar, so it is device-agnostic. Identical
+        # numerically: both cap the value at 1e15.
+        _CAP = 10**15
+        res = torch.clamp(torch.exp(torch.clamp(ex, max=math.log(_CAP))), max=_CAP)
     
     
         memo[ind_m] = float(res.detach().cpu().numpy().squeeze())
