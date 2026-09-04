@@ -103,6 +103,33 @@ class LinearPrior(nn.Module):
 # are per-region (passed in); the shared prior head supplies p_0 = f_phi(v).
 # Returns the differentiable region loss; populates `memo` in place (for gen_cred).
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Contracted Woodbury pieces (results.tex eq:contract).
+#
+# U = n * diag(sigma^2 c) restricted to the K_C columns in `ind`, so U has
+# exactly K_C non-zeros: U[ind[k], k] = n * sigma^2 * c[ind[k]] =: w[k]. The
+# original code built U as a DENSE (m_r x m_r) diagonal and sliced it, then
+# formed sigma_inv = U inv V as a DENSE (m_r x m_r), only to contract it to a
+# scalar. That is the 2 m_r^2 K_C term. Every product below is O(m_r K_C) or
+# O(K_C^2) instead, and no m_r x m_r matrix is ever allocated.
+#
+#   V U        = LD[ind][:, ind] * w            (K, K)
+#   z^T U      = z[ind]^T * w                   (1, K)
+#   z^T Sig^-1 s = z^T s - (z^T U) inv (V s)
+#
+# Algebraically identical to the dense form; floating-point results differ in
+# the last bits because the contraction order changes.
+# ---------------------------------------------------------------------------
+def _woodbury_pieces(S, z, ld, n_sub, sigma_sq, cc, ind):
+    """Return (VU, zU, VS, zS) with no m_r x m_r intermediate."""
+    w = n_sub * sigma_sq * cc[ind]            # (K,) the non-zero entries of U
+    VU = ld[ind][:, ind] * w.unsqueeze(0)     # (K, K)  == V @ U
+    zU = (z[ind].squeeze(-1) * w).unsqueeze(0)  # (1, K) == z^T @ U
+    VS = torch.mm(ld[ind, :], S)              # (K, 1)  == V @ S
+    zS = torch.mm(z.T, S)                     # (1, 1)  == z^T @ S
+    return VU, zU, VS, zS
+
+
 def _abf(S, z, ld, memo, n_sub, sigma_sq, cc, p0, K_C, eps):
     id_sort = np.argsort(cpu(cc).data.numpy())[::-1][:K_C]
     cc_t = cc[list(id_sort)]
@@ -112,12 +139,13 @@ def _abf(S, z, ld, memo, n_sub, sigma_sq, cc, p0, K_C, eps):
     if len(ind) > 0:
         if ind_m in memo:
             return memo[ind_m]
-        U = n_sub * torch.diag(sigma_sq * cc)[:, ind]
-        V = ld[ind, :]
-        inv = torch.inverse(gpu(torch.eye(len(ind))) + torch.mm(V, U))
-        sigma_inv = torch.mm(torch.mm(U, inv), V)
-        sigma = gpu(torch.eye(len(ind))) + torch.mm(V, U)
-        sigma2 = torch.matmul(torch.matmul(z.T, sigma_inv), S) / 2
+        VU, zU, VS, _ = _woodbury_pieces(S, z, ld, n_sub, sigma_sq, cc, ind)
+        eyeK = gpu(torch.eye(len(ind)))
+        inv = torch.inverse(eyeK + VU)
+        # _abf's sigma_inv is U inv V (no identity term), so the quadratic form
+        # is (z^T U) inv (V S) with no z^T S.
+        sigma2 = torch.mm(torch.mm(zU, inv), VS) / 2
+        sigma = eyeK + VU
         prior = 1 - p0
         prior[ind] = p0[ind]
         res = -torch.logdet(sigma) / 2 + sigma2 + torch.sum(torch.log(prior))
@@ -151,14 +179,15 @@ def _region_elbo(model, prior_head, S, Z, LD, v, temp, n_samples, sigma_sq,
         cc = c[i]
         if gamma > 0:
             _abf(S, Zc, LD, memo, n_sub, sigma_sq, cc, p_0, K_C_eff, gamma)
-        U = n_sub * torch.diag(sigma_sq * cc)[:, ind]
-        V = LD[ind, :]
+        # Contracted Woodbury: no m_r x m_r matrix is formed. sigma_inv here
+        # carries the identity term, so the quadratic form is
+        #   z^T (I - U inv V) s = z^T s - (z^T U) inv (V s).
+        VU, zU, VS, zS = _woodbury_pieces(S, Zc, LD, n_sub, sigma_sq, cc, ind)
         eyeKC = gpu(torch.eye(K_C_eff))
-        eyeM = gpu(torch.eye(M))
-        inv = torch.inverse(eyeKC + torch.mm(V, U))
-        sigma_inv = eyeM - torch.mm(torch.mm(U, inv), V)
-        sigma = eyeKC + torch.mm(V, U) + 1e-6 * eyeKC
-        sigma2 = -torch.matmul(torch.matmul(Zc.T, sigma_inv), S) / 2
+        inv = torch.inverse(eyeKC + VU)
+        quad = zS - torch.mm(torch.mm(zU, inv), VS)
+        sigma = eyeKC + VU + 1e-6 * eyeKC
+        sigma2 = -quad / 2
         log_likelihood = -torch.logdet(sigma) / 2 + sigma2
         if not torch.isfinite(log_likelihood):
             continue
