@@ -45,6 +45,7 @@ flags.DEFINE_list('prior_neural_network', '10,200,10', 'LassoNet prior hidden di
 flags.DEFINE_float('prior_regularisation', 1.0, 'L2 regularisation on the prior (p_0).')
 flags.DEFINE_float('lambda_l1', 0.01, 'L1 penalty for LassoNet skip connections (ignored by linear head).')
 flags.DEFINE_float('hierarchy_M', 10.0, 'LassoNet hierarchy constraint multiplier.')
+flags.DEFINE_boolean('identifiable_head', False, 'Emit ONE logit contrast from the LassoNet prior instead of two logits, so the L1 threshold and hierarchy gate act on the identifiable quantity that is also reported as feature importance.')
 
 
 def _parse_manifest(path, default_N):
@@ -91,6 +92,7 @@ def main(argv):
         'prior_regularisation': FLAGS.prior_regularisation,
         'lambda_l1': FLAGS.lambda_l1,
         'hierarchy_M': FLAGS.hierarchy_M,
+        'identifiable_head': FLAGS.identifiable_head,
         'n_causal': FLAGS.n_caus,
         'coverage_ths': FLAGS.gamma_coverage,
         'selection_prob': FLAGS.gamma_selection,

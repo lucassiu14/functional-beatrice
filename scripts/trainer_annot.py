@@ -251,21 +251,35 @@ class LassoNetPrior(nn.Module):
     Reference: LeMeur et al., "LassoNet: A Neural Network with Feature Sparsity"
     """
 
-    def __init__(self, m, hidden_dims=[32, 16], M=10.0):
+    def __init__(self, m, hidden_dims=[32, 16], M=10.0, identifiable=False):
         """
         Args:
             m: number of input annotations per variant
             hidden_dims: list of hidden layer sizes
             M: hierarchy constraint multiplier (larger M = looser constraint)
+            identifiable: emit ONE logit contrast per variant instead of two
+                logits. The two-logit softmax is invariant to adding a constant
+                to both, so only the contrast theta[:,1]-theta[:,0] affects p_0.
+                compute_feature_importance already reports that contrast, but
+                proximal_l1 and apply_hierarchy_constraint act on the raw
+                two-column theta, i.e. on a quantity that includes a direction
+                with no effect on the output. With identifiable=True the head
+                carries a single column, so the L1 threshold and the hierarchy
+                gate act on exactly the quantity that is reported and that
+                matters. Same model class - the second column was redundant -
+                but a different regulariser, so results will differ. Default
+                False keeps functional_beatrice bit-identical.
         """
         super().__init__()
         self.m = m  # number of input features
         self.hidden_dims = hidden_dims
         self.M = M
+        self.identifiable = identifiable
+        n_out = 1 if identifiable else 2
 
         # Skip connection: direct path from input features to output
-        # θ has shape (m, 2) - each feature contributes directly to 2 output logits
-        self.skip = nn.Linear(m, 2, bias=False)
+        # θ has shape (m, n_out); n_out = 1 is the identifiable contrast.
+        self.skip = nn.Linear(m, n_out, bias=False)
 
         # First hidden layer - weights constrained by hierarchy
         # W^(1) has shape (m, hidden_dims[0])
@@ -280,7 +294,7 @@ class LassoNetPrior(nn.Module):
             last_dim = h
 
         # Final layer from hidden to output
-        layers.append(nn.Linear(last_dim, 2, bias=False))
+        layers.append(nn.Linear(last_dim, n_out, bias=False))
         self.hidden_layers = nn.Sequential(*layers)
 
         self.relu = nn.ReLU()
@@ -312,8 +326,11 @@ class LassoNetPrior(nn.Module):
 
         Returns tensor of shape (m,).
         """
-        theta = self.get_skip_weights()          # (m, 2)
-        contrast = theta[:, 1] - theta[:, 0]     # identifiable logit contrast
+        theta = self.get_skip_weights()          # (m, n_out)
+        # With identifiable=True the single column IS the contrast, so no
+        # subtraction is needed and the quantity the L1 and the hierarchy gate
+        # act on is the same one reported here.
+        contrast = theta[:, 0] if self.identifiable else theta[:, 1] - theta[:, 0]
         importance = torch.abs(contrast)         # magnitude of contribution
         self.feature_importance = importance.detach().cpu().numpy()
         return importance
@@ -395,7 +412,12 @@ class LassoNetPrior(nn.Module):
         hidden_out = self.hidden_layers(h)  # (bp, 2)
 
         # Combine skip and hidden paths
-        out = skip_out + hidden_out  # (bp, 2)
+        out = skip_out + hidden_out  # (bp, n_out)
+        if self.identifiable:
+            # Pin the first logit to zero and keep the (bp, 2) shape, so the
+            # softmax below is exactly sigmoid(contrast) and every downstream
+            # consumer - imp_o, the Gumbel draws - is untouched.
+            out = torch.cat([torch.zeros_like(out), out], dim=1)  # (bp, 2)
 
         # Convert to probabilities
         imp = torch.exp(out)
