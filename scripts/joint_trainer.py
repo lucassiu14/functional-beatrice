@@ -313,10 +313,9 @@ def run_joint(options):
         head_desc = "LinearPrior (idea #1: shared logistic annotation prior)"
     else:
         prior_head = gpu(LassoNetPrior(m=m_annots, hidden_dims=prior_hidden,
-                                       M=hierarchy_M,
-                                       identifiable=options.get('identifiable_head', False)))
+                                       M=hierarchy_M))
         head_desc = (f"LassoNetPrior (idea #2: shared, hidden={prior_hidden}, "
-                     f"M={hierarchy_M}, identifiable={options.get('identifiable_head', False)})")
+                     f"M={hierarchy_M}, one logit per variant)")
     print(f"[joint] {R} regions, {m_annots} annotations, head={head_desc}")
     print(f"[joint] {device_report()}")
 

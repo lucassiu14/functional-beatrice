@@ -248,37 +248,32 @@ class LassoNetPrior(nn.Module):
     The hierarchy constraint ensures: ||W^(1)_j||_2 ≤ M * |θ_j|
     If a feature's skip connection is zero, it cannot contribute through hidden layers.
 
+    The head emits ONE logit per variant, and the first logit of the two-logit
+    softmax used downstream is pinned at zero, so p_0 = sigmoid(logit). A
+    two-logit softmax is invariant to adding the same function to both logits,
+    so only their difference is identified; carrying that difference as the one
+    column means the L1 threshold, the hierarchy gate and the reported
+    importance all act on the same identified quantity. The earlier two-column
+    head, which penalised both columns separately, has been removed.
+
     Reference: LeMeur et al., "LassoNet: A Neural Network with Feature Sparsity"
     """
 
-    def __init__(self, m, hidden_dims=[32, 16], M=10.0, identifiable=False):
+    def __init__(self, m, hidden_dims=[32, 16], M=10.0):
         """
         Args:
             m: number of input annotations per variant
             hidden_dims: list of hidden layer sizes
             M: hierarchy constraint multiplier (larger M = looser constraint)
-            identifiable: emit ONE logit contrast per variant instead of two
-                logits. The two-logit softmax is invariant to adding a constant
-                to both, so only the contrast theta[:,1]-theta[:,0] affects p_0.
-                compute_feature_importance already reports that contrast, but
-                proximal_l1 and apply_hierarchy_constraint act on the raw
-                two-column theta, i.e. on a quantity that includes a direction
-                with no effect on the output. With identifiable=True the head
-                carries a single column, so the L1 threshold and the hierarchy
-                gate act on exactly the quantity that is reported and that
-                matters. Same model class - the second column was redundant -
-                but a different regulariser, so results will differ. Default
-                False keeps functional_beatrice bit-identical.
         """
         super().__init__()
         self.m = m  # number of input features
         self.hidden_dims = hidden_dims
         self.M = M
-        self.identifiable = identifiable
-        n_out = 1 if identifiable else 2
+        n_out = 1  # one identified logit per variant; see the class docstring
 
         # Skip connection: direct path from input features to output
-        # θ has shape (m, n_out); n_out = 1 is the identifiable contrast.
+        # θ has shape (m, 1): one coefficient per annotation.
         self.skip = nn.Linear(m, n_out, bias=False)
 
         # First hidden layer - weights constrained by hierarchy
@@ -304,8 +299,8 @@ class LassoNetPrior(nn.Module):
         self.feature_importance = None
 
     def get_skip_weights(self):
-        """Return the skip connection weights θ (m x 2)."""
-        return self.skip.weight.T  # Transpose to get (m, 2)
+        """Return the skip connection weights θ (m x 1)."""
+        return self.skip.weight.T  # Transpose to get (m, 1)
 
     def get_first_layer_weights(self):
         """Return the first hidden layer weights W^(1) (hidden_dim x m)."""
@@ -313,25 +308,17 @@ class LassoNetPrior(nn.Module):
 
     def compute_feature_importance(self):
         """
-        Compute feature importance from the identifiable logit contrast.
+        Compute feature importance as |theta_j|.
 
-        The two-output softmax parameterisation is invariant to adding the same
-        annotation-dependent function to both logits: softmax(out + c) ==
-        softmax(out), so the causal probability imp_o is unchanged. However
-        the naive L2-norm importance ||theta_j||_2 IS affected by that shift,
-        making it non-identifiable from the causal probability. The identifiable
-        quantity is the logit contrast delta_j = theta[j, 1] - theta[j, 0];
-        its magnitude reports how much annotation j moves the log-odds of the
-        causal class, independent of any common shift.
+        theta_j is annotation j's coefficient on the single identified logit, so
+        its magnitude is how much annotation j moves the log-odds of the causal
+        class through the linear path. It is the same quantity the L1 threshold
+        and the hierarchy gate act on.
 
         Returns tensor of shape (m,).
         """
-        theta = self.get_skip_weights()          # (m, n_out)
-        # With identifiable=True the single column IS the contrast, so no
-        # subtraction is needed and the quantity the L1 and the hierarchy gate
-        # act on is the same one reported here.
-        contrast = theta[:, 0] if self.identifiable else theta[:, 1] - theta[:, 0]
-        importance = torch.abs(contrast)         # magnitude of contribution
+        theta = self.get_skip_weights()          # (m, 1)
+        importance = torch.abs(theta[:, 0])      # magnitude of contribution
         self.feature_importance = importance.detach().cpu().numpy()
         return importance
 
@@ -355,7 +342,7 @@ class LassoNetPrior(nn.Module):
         Must be called after optimizer.step() and before apply_hierarchy_constraint().
         """
         with torch.no_grad():
-            w = self.skip.weight.data          # (2, m)
+            w = self.skip.weight.data          # (1, m)
             threshold = lambda_l1 * lr
             self.skip.weight.data = torch.sign(w) * torch.clamp(torch.abs(w) - threshold, min=0.0)
 
@@ -368,7 +355,7 @@ class LassoNetPrior(nn.Module):
         This should be called after each optimizer step.
         """
         with torch.no_grad():
-            theta = self.get_skip_weights()  # (m, 2)
+            theta = self.get_skip_weights()  # (m, 1)
             W1 = self.get_first_layer_weights()  # (hidden_dims[0], m)
 
             # For each feature j
@@ -405,19 +392,18 @@ class LassoNetPrior(nn.Module):
         eps = 1e-7
 
         # Skip connection path
-        skip_out = self.skip(X)  # (bp, 2)
+        skip_out = self.skip(X)  # (bp, 1)
 
         # Hidden layer path
         h = self.relu(self.first_hidden(X))  # (bp, hidden_dims[0])
-        hidden_out = self.hidden_layers(h)  # (bp, 2)
+        hidden_out = self.hidden_layers(h)  # (bp, 1)
 
-        # Combine skip and hidden paths
-        out = skip_out + hidden_out  # (bp, n_out)
-        if self.identifiable:
-            # Pin the first logit to zero and keep the (bp, 2) shape, so the
-            # softmax below is exactly sigmoid(contrast) and every downstream
-            # consumer - imp_o, the Gumbel draws - is untouched.
-            out = torch.cat([torch.zeros_like(out), out], dim=1)  # (bp, 2)
+        # Combine skip and hidden paths into the one identified logit, then pin
+        # a zero first logit beside it. The (bp, 2) shape leaves every downstream
+        # consumer - imp_o, the Gumbel draws - unchanged, and the softmax below
+        # is sigmoid(logit) up to its 1e-7 stabiliser.
+        out = skip_out + hidden_out  # (bp, 1)
+        out = torch.cat([torch.zeros_like(out), out], dim=1)  # (bp, 2)
 
         # Convert to probabilities
         imp = torch.exp(out)
@@ -960,7 +946,13 @@ def main(options):
             print(f"Loading prior network weights from: {options['prior_weights']}")
             checkpoint = torch.load(options['prior_weights'], map_location='cpu')
 
-            # Check architecture compatibility
+            # Check architecture compatibility. A checkpoint from the removed
+            # two-logit head carries a two-row skip layer and cannot be loaded.
+            skip_shape = tuple(checkpoint['state_dict']['skip.weight'].shape)
+            if skip_shape[0] != 1:
+                raise ValueError(f"Prior weights were saved by the removed two-logit LassoNet head "
+                                 f"(skip layer {skip_shape}); the head now emits one logit per "
+                                 f"variant, so retrain the prior.")
             if checkpoint.get('n_annotations') != v.shape[1]:
                 raise ValueError(f"Annotation dimension mismatch: weights expect {checkpoint.get('n_annotations')} annotations, but data has {v.shape[1]}")
             if checkpoint.get('hidden_dims') != prior_neural_network_layers:
