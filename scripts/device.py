@@ -12,11 +12,10 @@ whole package device-selectable without touching the model code.
 
 CONTRACT
 --------
-The device is read ONCE from $FMBENCH_DEVICE and cached:
+The device is read ONCE from $BEATRICE_DEVICE and cached:
 
-    unset / "cpu"   -> torch.device("cpu")      [DEFAULT - byte-identical to the
-                                                 pre-existing behaviour, so
-                                                 Iteration 004 is unaffected]
+    unset / "cpu"   -> torch.device("cpu")      [DEFAULT, and byte-identical to
+                                                 upstream's hardcoded behaviour]
     "cuda" / "gpu"  -> torch.device("cuda")
     anything else   -> passed to torch.device() verbatim (e.g. "mps", "cuda:1")
 
@@ -41,22 +40,22 @@ _DEVICE = None
 
 
 def get_device():
-    """Resolve (and cache) the target torch device from $FMBENCH_DEVICE."""
+    """Resolve (and cache) the target torch device from $BEATRICE_DEVICE."""
     global _DEVICE
     if _DEVICE is not None:
         return _DEVICE
 
-    want = os.environ.get("FMBENCH_DEVICE", "cpu").strip().lower()
+    want = os.environ.get("BEATRICE_DEVICE", "cpu").strip().lower()
     if want in ("", "cpu"):
         _DEVICE = torch.device("cpu")
     elif want in ("gpu", "cuda"):
         if not torch.cuda.is_available():
             raise RuntimeError(
-                "FMBENCH_DEVICE=%s but torch.cuda.is_available() is False. "
+                "BEATRICE_DEVICE=%s but torch.cuda.is_available() is False. "
                 "Refusing to fall back to CPU: a silent fallback would report a "
-                "CPU runtime as a GPU runtime. Check the job requested a GPU "
-                "(e.g. -l select=1:ncpus=4:mem=32gb:ngpus=1) and that the venv's "
-                "torch is a CUDA build (torch.version.cuda is not None)." % want)
+                "CPU runtime as a GPU runtime. Check that the machine really has "
+                "a GPU allocated and that this torch is a CUDA build "
+                "(torch.version.cuda is not None)." % want)
         _DEVICE = torch.device("cuda")
     else:
         _DEVICE = torch.device(want)

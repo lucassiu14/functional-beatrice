@@ -1,10 +1,10 @@
 """
-beatrice_joint.py  -  CLI for CROSS-REGION JOINT prior training (Iteration 003).
+beatrice_joint.py  -  CLI for cross-region JOINT prior training.
 
 Trains ONE shared annotation prior head jointly across ALL regions listed in a
-manifest, then writes per-region pip.csv / credible_set.txt (via gen_cred) into
-each region's own target dir. See scripts/joint_trainer.py for the model / the
-joint objective and the equal-weight-per-region decision.
+manifest, then writes per-region pip.csv / credible_set.txt into each region's
+own target directory. See scripts/joint_trainer.py for the model, the joint
+objective, and why regions are weighted equally.
 
 Manifest (--manifest): a tab-separated file, one region per line, columns:
     z <tab> LD <tab> annot <tab> target <tab> N
@@ -12,8 +12,8 @@ An optional header line 'z\tLD\tannot\ttarget\tN' is tolerated. `annot` is
 REQUIRED for every region (a joint annotation prior needs annotations).
 
 Prior head (--prior_head):
-    'lassonet' (default) -> LassoNetPrior     (user idea #2)
-    'linear'             -> LinearPrior        (user idea #1, flagship)
+    'lassonet' (default) -> LassoNetPrior, the sparse non-linear prior
+    'linear'             -> LinearPrior, a plain logistic map on annotations
 
 Example:
     python beatrice_joint.py --manifest scenario.tsv --N 50000 --prior_head linear \\
@@ -26,7 +26,7 @@ import os
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string('manifest', None, 'TSV of per-region z,LD,annot,target,N (one row per region).')
-flags.DEFINE_string('prior_head', 'lassonet', "Shared prior head: 'lassonet' (idea #2) or 'linear' (idea #1).")
+flags.DEFINE_string('prior_head', 'lassonet', "Shared prior head: 'lassonet' or 'linear'.")
 flags.DEFINE_string('save_prior_weights', '', 'Optional path to save the trained shared prior head (.pt).')
 flags.DEFINE_integer('N', 50000, 'Default sample size when a manifest row omits N.', lower_bound=0)
 flags.DEFINE_integer('MCMC_samples', 1, 'MC integration samples', lower_bound=1)

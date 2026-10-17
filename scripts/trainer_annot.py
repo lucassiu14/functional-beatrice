@@ -5,7 +5,6 @@ import numpy as np
 import matplotlib
 import shutil
 import os
-import glob
 from scripts.convert_to_gpu import gpu
 from scripts.convert_to_gpu_and_tensor import gpu_t
 from scripts.convert_to_gpu_scalar import gpu_ts
@@ -15,9 +14,6 @@ import matplotlib.pyplot as plt
 import pickle
 import torch.nn.functional as F
 from torch.autograd import Variable
-import pandas as pd
-import imageio
-import seaborn as sn
 from tqdm.auto import tqdm
 import scripts.generate_credible_sets as gen_cred
 import pandas as pd
@@ -30,7 +26,7 @@ matplotlib.use('Agg')
 def save_object(obj, filename):
     with open(filename, 'wb') as output:  # Overwrites any existing file.
         pickle.dump(obj, output, 4)
-        
+
 def load_object(filename):
     with open(filename, 'rb') as input:  # Overwrites any existing file.
         obj = pickle.load(input)
@@ -51,29 +47,6 @@ def calculate_pip(M,bp):
         return pip
     return np.squeeze(pip/tot)
 
-def make_gif(M, bp, loc, store, ep):
-    tr      = np.zeros(bp)
-    tr[loc] = 1
-    pip = []
-    for k in M:   
-        pip+= list(k)
-    sn.histplot(pip, stat='count', bins=100,element='poly')
-    #plt.stem(tr*(ep/2))
-    plt.savefig(store+'/'+str(ep)+'.png')
-    plt.close()
-    
-    list_of_files = filter( os.path.isfile,
-                        glob.glob(store+ '/*.png') )
-    # Sort list of files based on last modification time in ascending order
-    filenames = sorted( list_of_files,
-                        key = os.path.getmtime)
-
-    images = []
-    for filename in filenames:
-        images.append(imageio.imread(filename))
-    imageio.mimsave(store+'/movie.gif', images)
-    return 
-    
 def regularize_ld(LD):
     """Regularize LD to make it non-singular
     """
@@ -96,12 +69,12 @@ def regularize_ld(LD):
     s = np.linalg.eigvalsh(_A)      # only reached when a shift is actually due
     s_new = torch.zeros(len(s))
     if min(s)<10**-3:
-        s_new = torch.ones(len(s))*(min(s)-10**-3)   
+        s_new = torch.ones(len(s))*(min(s)-10**-3)
         print("\n Adding a constant {} to regularize LD".format(-min(s)+10**-3))
-    LD = LD - gpu(torch.diag(s_new))    
+    LD = LD - gpu(torch.diag(s_new))
     return LD
-    
-    
+
+
 def reformat_memo(memo, p0):
     memo[tuple([])] = float(torch.sum(torch.log(1 - p0)).item())
     m0 = float(np.mean([float(np.asarray(val).squeeze()) for val in memo.values()]))
@@ -116,17 +89,17 @@ class network(nn.Module):
         """Initialization of the neural network.
         """
         super(network, self).__init__()
-        
-  
+
+
         self.softmax  = nn.Softmax(dim=1)
         self.imp      =[]
         self.sig = nn.Sigmoid()
         self.rel = nn.ReLU()
         self.tan = nn.Tanh()
-        
+
         self.sig           = nn.Sigmoid()
 
-        
+
         self.L1 = nn.Linear(f_dim[0], f_dim[1], bias=False)
         self.N1 = nn.LayerNorm(K)
         self.A1 = nn.Sequential(
@@ -139,44 +112,44 @@ class network(nn.Module):
             nn.Linear(f_dim[2], f_dim[3], bias=False)
             )
         self.N3 =  nn.LayerNorm(K)
-        
+
         self.A3 = nn.Sequential(
-            nn.ReLU()           
+            nn.ReLU()
             )
-        
+
 
         self.conc = nn.Linear(f_dim[n_l], 2,bias=False)
 
-        
+
         self.A = A
         self.x = x
         self.degree = []
         self.variance = nn.Parameter(torch.rand(1))
-        
-        
+
+
     def gumbel(self,alpha,t):
         """ Generate Binary Concrete Vectors."""
         u = (-torch.log(-torch.log(gpu(torch.rand(alpha.size())))) + alpha)/t
         return F.softmax(u,dim=1)
-    
-        
+
+
     def forward(self, T, samples):
-        """ The inference module which generates the parameters of the binary 
-        concrete distribution and generate samples of binary concrete vectors.      
+        """ The inference module which generates the parameters of the binary
+        concrete distribution and generate samples of binary concrete vectors.
         """
 
         eps = gpu_ts(10**-7)
-        X   = self.x.unsqueeze(1)        
+        X   = self.x.unsqueeze(1)
         out = self.conc(self.A3(self.N3(self.A2(self.N2(self.A1(self.N1(self.L1(X).T).T).T).T).T).T)  )
 
         imp     = gpu(torch.exp(out))
         imp_o   = imp[:,1]/torch.sum(imp,dim=1)
         self.imp = cpu(imp_o.detach()).data.numpy()
-        
+
         eps = gpu_ts(10**-6)
         if self.training:
-                 z_N     = self.gumbel(torch.log(imp.repeat(samples, 1)+eps), T) 
-                 z_N1    = self.gumbel(torch.log(imp.repeat(1, 1)+eps), T) 
+                 z_N     = self.gumbel(torch.log(imp.repeat(samples, 1)+eps), T)
+                 z_N1    = self.gumbel(torch.log(imp.repeat(1, 1)+eps), T)
                  z_N2    = self.gumbel(torch.log(imp.repeat(1, 1)+eps), T)
                  if torch.isnan(torch.max(z_N)):
                      print(torch.max(z_N))
@@ -438,47 +411,47 @@ class finemapper():
         self.model = model
         self.opt = opt
         self.scheduler = sch
-    
+
 
     def abf(self, z, ld, memo, n_sub, sigma_sq, cc, p0, K_C, eps):
 
         id_sort = np.argsort(cpu(cc).data.numpy())[::-1]
         id_sort = id_sort[:K_C]
-        
+
         cc_t = cc[list(id_sort)]
-        
+
         ind = sorted(id_sort[cpu(torch.where(cc_t>eps)[0]).data.numpy()])
         ind_m  = tuple(ind)
         cc = gpu(torch.ones(len(z)))
-        
+
         if len(ind)>0:
             if ind_m in memo:
                 return memo[ind_m]
-        
+
             U =  n_sub*torch.diag(sigma_sq*cc)[:,ind]
             V = ld[ind,:]
-                
+
             inv            = torch.inverse(gpu(torch.eye(len(ind))) + torch.mm(V,U))
-                
+
             sigma_inv      = torch.mm(torch.mm(U,inv),V)
-                
+
             sigma          = gpu(torch.eye(len(ind))) + torch.mm(V,U)
-                
+
             sigma2         = torch.matmul(torch.matmul(z.T, sigma_inv),self.S)/2
-        
+
             prior = 1 - p0
             prior[ind] = p0[ind]
-        
-            res =  -torch.logdet(sigma)/2 + sigma2 + torch.sum(torch.log(prior)) 
-        
-        
+
+            res =  -torch.logdet(sigma)/2 + sigma2 + torch.sum(torch.log(prior))
+
+
             memo[ind_m] = float(res.detach().cpu().numpy().squeeze())
-        
+
             return res
         else:
             return
-        
-        
+
+
     def train(self, z_score, ld, temp, n_samples, sigma_sq, n_sub, p_0, num_iter, memo, epp, K_C, gamma):
         self.model.train()  # make training mode explicit
 
@@ -564,10 +537,10 @@ class finemapper():
 
         # always return scalars so your histories grow by exactly one per epoch
         return [np.mean(ll_total)], [np.mean(ll_lik)], [np.mean(ll_kl)]
-    
-        
-        
-    
+
+
+
+
 
 
 class finemapper_lassonet():
@@ -727,45 +700,45 @@ class finemapper_annot():
         self.opt = opt
         self.scheduler = sch
         self.lambda_reg = lambda_reg
-    
+
     def abf(self, z, ld, memo, n_sub, sigma_sq, cc, p0, K_C, eps):
 
         id_sort = np.argsort(cpu(cc).data.numpy())[::-1]
         id_sort = id_sort[:K_C]
-        
+
         cc_t = cc[list(id_sort)]
-        
+
         ind = sorted(id_sort[cpu(torch.where(cc_t>eps)[0]).data.numpy()])
         ind_m  = tuple(ind)
         cc = gpu(torch.ones(len(z)))
-        
+
         if len(ind)>0:
             if ind_m in memo:
                 return memo[ind_m]
-        
+
             U =  n_sub*torch.diag(sigma_sq*cc)[:,ind]
             V = ld[ind,:]
-                
+
             inv            = torch.inverse(gpu(torch.eye(len(ind))) + torch.mm(V,U))
-                
+
             sigma_inv      = torch.mm(torch.mm(U,inv),V)
-                
+
             sigma          = gpu(torch.eye(len(ind))) + torch.mm(V,U)
-                
+
             sigma2         = torch.matmul(torch.matmul(z.T, sigma_inv),self.S)/2
-        
+
             prior = 1 - p0
             prior[ind] = p0[ind]
-        
-            res =  -torch.logdet(sigma)/2 + sigma2 + torch.sum(torch.log(prior)) 
-        
-        
+
+            res =  -torch.logdet(sigma)/2 + sigma2 + torch.sum(torch.log(prior))
+
+
             memo[ind_m] = float(res.detach().cpu().numpy().squeeze())
-        
+
             return res
         else:
             return
-        
+
     def train(self, z_score, ld, v, temp, n_samples, sigma_sq, n_sub, num_iter, memo, epp, K_C, gamma):
         """Training loop with annotations (robust: no silent early-returns)."""
         self.model.train()
@@ -860,9 +833,9 @@ class finemapper_annot():
 
 ##################################################################
 
-def main(options):    
+def main(options):
     """
-    options: A dictionary of hyper-parameters. 
+    options: A dictionary of hyper-parameters.
     """
     start_time = time.time()
     ###################
@@ -879,12 +852,11 @@ def main(options):
         if torch.max(Z)==torch.inf:
             print('Z vector has inf as an element, converting it to 200')
             Z[torch.where(Z==torch.inf)[0]] = 200
-            
+
         LD = gpu_t(pd.read_table(options['LD'], sep=' ', header=None).to_numpy())
 
         if options['annot_given']:
             v  = gpu_t(pd.read_table(options['annot'],  sep=None, engine = 'python', header=None).to_numpy()[:,1:].astype(float))
-            #v  = gpu_t(pd.read_table(options['annot'],  sep=' ', header=None).to_numpy()[:,1:].astype(float))
 
             if torch.max(v)==torch.inf:
                 print('v vector has inf as an element, converting it to 200')
@@ -894,7 +866,7 @@ def main(options):
     except BaseException as be:
         print(be)
         return
-    
+
     print(f"Annot given? {options['annot_given']}")
 
     if LD.size()[0]!=LD.size()[1]:
@@ -904,18 +876,18 @@ def main(options):
     if options['annot_given']:
         if Z.size()[0]!=v.size()[0]:
             return print("\n Dimension of Z and dimension of v are not same. Dim of Z = {}, dim of v = {}".format(list(Z.size()), list(v.size()) ))
-    
+
 
     bp  = len(Z) # Number of variants..
-    LD = regularize_ld(LD) 
-    
+    LD = regularize_ld(LD)
+
     n_sub    = gpu_ts(options['n_sub'])
-    
+
     if len(options['loc_true'])!=0:
         loc      = options['loc_true']
     else:
         loc = []
-    
+
 
     ## Hyperparamters
     n_samples = options['MCMC_samples']
@@ -1129,14 +1101,14 @@ def main(options):
         print(feat_imp_df.head(10).to_string(index=False))
 
     if options['get_cred']:
-        gen_cred.main(options) 
+        gen_cred.main(options)
     else:
         df = {'variant_index':list(range(bp)),'pip':pip, 'variant_names':names}
         df = pd.DataFrame(df)
         df.to_csv(os.path.join(options['target'],'pip.csv'), index=False)
-    
+
     finish_time = time.time()
-    
+
     f = open(os.path.join(options['target'],'time'),'w')
     f.write(str(finish_time-start_time))
     f.close()

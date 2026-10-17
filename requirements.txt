@@ -6,10 +6,8 @@ absl-py
 numpy
 pandas
 torch
-
-# Imported unconditionally by scripts/trainer_annot.py for its training-loss
-# plots, so they are required even when --plot_loss is false.
-imageio
-matplotlib
-seaborn
 tqdm
+
+# matplotlib is imported at module level by scripts/trainer_annot.py, which
+# writes PIP and loss plots when --plot_loss is set (the default).
+matplotlib

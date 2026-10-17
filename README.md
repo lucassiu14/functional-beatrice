@@ -60,6 +60,20 @@ The `--z` / `--LD` / `--annot` flags default to paths under `example_data/`,
 which is not in this repository, so pass your own files rather than relying on
 the defaults.
 
+## Quickstart
+
+[`examples/README.md`](examples/README.md) is a complete worked run on simulated
+data — generate it, fit one locus, fit three jointly, and score the output
+against the known answer — in about half a minute on a laptop CPU:
+
+```bash
+python examples/make_example_data.py
+python beatrice_joint.py --manifest examples/data/manifest.tsv \
+    --N 50000 --n_caus 3 --max_iter 1500 --lambda_l1 0.2 \
+    --prior_head lassonet
+python examples/check_results.py examples/results_joint
+```
+
 ## Running one locus
 
 ```bash
@@ -73,7 +87,9 @@ per-variant annotation matrix. Results are written to `--target`: posterior
 inclusion probabilities, and credible sets when `--get_cred` is set.
 
 The prior is controlled by `--lambda_l1` (the L1 penalty on the skip
-connections, which decides how many annotations the prior may use),
+connections, which decides how many annotations the prior may use — the default
+0.01 is too weak to select anything, see
+[`examples/README.md`](examples/README.md#on---lambda_l1)),
 `--hierarchy_M` (how much non-linearity an annotation is allowed relative to
 its linear effect) and `--prior_neural_network` (the hidden layer widths).
 `--return_weights` saves the trained prior so `--prior_weights` can reuse it.
