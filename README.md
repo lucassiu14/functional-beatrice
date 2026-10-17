@@ -69,8 +69,7 @@ against the known answer — in about half a minute on a laptop CPU:
 ```bash
 python examples/make_example_data.py
 python beatrice_joint.py --manifest examples/data/manifest.tsv \
-    --N 50000 --n_caus 3 --max_iter 1500 --lambda_l1 0.2 \
-    --prior_head lassonet
+    --N 50000 --n_caus 3 --max_iter 1500 --prior_head lassonet
 python examples/check_results.py examples/results_joint
 ```
 
@@ -87,8 +86,8 @@ per-variant annotation matrix. Results are written to `--target`: posterior
 inclusion probabilities, and credible sets when `--get_cred` is set.
 
 The prior is controlled by `--lambda_l1` (the L1 penalty on the skip
-connections, which decides how many annotations the prior may use — the default
-0.01 is too weak to select anything, see
+connections, which decides how many annotations the prior may use; the default
+0.1223 is the best value from a sweep, see
 [`examples/README.md`](examples/README.md#on---lambda_l1)),
 `--hierarchy_M` (how much non-linearity an annotation is allowed relative to
 its linear effect) and `--prior_neural_network` (the hidden layer widths).

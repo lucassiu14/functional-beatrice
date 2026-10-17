@@ -43,7 +43,10 @@ flags.DEFINE_boolean('allow_dup', False, 'Allow duplicate variants across credib
 flags.DEFINE_list('neural_network', '10,200,10', 'Finemapping net hidden dims.')
 flags.DEFINE_list('prior_neural_network', '10,200,10', 'LassoNet prior hidden dims.')
 flags.DEFINE_float('prior_regularisation', 1.0, 'L2 regularisation on the prior (p_0).')
-flags.DEFINE_float('lambda_l1', 0.01, 'L1 penalty for LassoNet skip connections (ignored by linear head).')
+flags.DEFINE_float('lambda_l1', 0.1223,
+                   'L1 penalty for LassoNet skip connections, ignored by the linear head. '
+                   'The default is the best value from a sweep of this penalty; below '
+                   '~0.06 annotation selection is no better than chance.')
 flags.DEFINE_float('hierarchy_M', 10.0, 'LassoNet hierarchy constraint multiplier.')
 
 

@@ -41,9 +41,12 @@ flags.DEFINE_boolean('return_weights', False,
     'train the prior network across multiple genomic regions.')
 
 # LassoNet-specific arguments
-flags.DEFINE_float('lambda_l1', 0.01,
-    'L1 penalty weight for LassoNet skip connections. Controls feature sparsity. '
-    'Higher values = more sparse feature selection. Typical range: 0.001-1.0')
+flags.DEFINE_float('lambda_l1', 0.1223,
+    'L1 penalty weight for LassoNet skip connections, which decides how many '
+    'annotations the prior may use. Higher values select more sparsely. The '
+    'default is the value a sweep of this penalty found best; below ~0.06 the '
+    'prior selects annotations no better than chance, and above ~0.5 average '
+    'precision falls away. Useful range: 0.03-0.5.')
 flags.DEFINE_float('hierarchy_M', 10.0,
     'Hierarchy constraint multiplier for LassoNet. Controls how much hidden layer '
     'weights can exceed skip connection weights. ||W^(1)_j|| <= M * |theta_j|. '
@@ -77,7 +80,7 @@ def run_beatrice_annot(beatrice_args: dict):
         "prior_regularisation": 1.0,
         "prior_weights": '',
         "return_weights": False,
-        "lambda_l1": 0.01,
+        "lambda_l1": 0.1223,
         "hierarchy_M": 10.0
         }
 

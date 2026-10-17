@@ -39,7 +39,7 @@ python beatrice_annot.py \
     --z examples/data/region1.z \
     --LD examples/data/region1.ld \
     --annot examples/data/region1.annot \
-    --N 50000 --n_caus 3 --max_iter 1500 --lambda_l1 0.2 \
+    --N 50000 --n_caus 3 --max_iter 1500 \
     --target examples/results_single/region1
 ```
 
@@ -50,14 +50,15 @@ zeroes the other nine:
 ```
 Top 10 most important annotations:
  annotation_index  importance
-                1    0.002588
+                4    0.030798
+                1    0.002380
                 0    0.000000
                 ...  0.000000
 ```
 
-Column 1 is one of the two that really matter — but column 0 was dropped, and
-nothing distinguishes it from the eight noise columns. **That is the limitation
-this method's joint model exists to address**: one region contains three causal
+Column 1 is one of the two that really matter, but it is ranked below a noise
+column, and column 0 was dropped entirely. **That is the limitation this
+method's joint model exists to address**: one region contains three causal
 variants, which is not enough evidence to identify a genome-wide enrichment.
 
 ## 3. All three loci, one shared prior
@@ -65,7 +66,7 @@ variants, which is not enough evidence to identify a genome-wide enrichment.
 ```bash
 python beatrice_joint.py \
     --manifest examples/data/manifest.tsv \
-    --N 50000 --n_caus 3 --max_iter 1500 --lambda_l1 0.2 \
+    --N 50000 --n_caus 3 --max_iter 1500 \
     --prior_head lassonet \
     --save_prior_weights examples/results_joint/prior_head.pt
 ```
@@ -82,28 +83,28 @@ python examples/check_results.py examples/results_joint
 ```
   region1
     causal variants      [5, 72, 74]
-    their PIPs           5:0.007 (rank 29), 72:0.093 (rank 2), 74:0.530 (rank 1)
-    top-ranked variant   74 (PIP 0.530)  <- causal
+    their PIPs           5:0.005 (rank 67), 72:0.101 (rank 2), 74:0.540 (rank 1)
+    top-ranked variant   74 (PIP 0.540)  <- causal
     credible sets        [[74, 72]]
     causal variants captured by a set  2/3
 
   region2
     causal variants      [30, 151, 210]
-    their PIPs           30:0.960 (rank 1), 151:0.188 (rank 2), 210:0.010 (rank 38)
-    top-ranked variant   30 (PIP 0.960)  <- causal
+    their PIPs           30:0.961 (rank 1), 151:0.192 (rank 2), 210:0.002 (rank 285)
+    top-ranked variant   30 (PIP 0.961)  <- causal
     credible sets        [[30]]
 
   region3
     causal variants      [89, 251, 266]
-    their PIPs           89:0.045 (rank 4), 251:0.169 (rank 2), 266:0.965 (rank 1)
-    top-ranked variant   266 (PIP 0.965)  <- causal
+    their PIPs           89:0.048 (rank 4), 251:0.178 (rank 2), 266:0.969 (rank 1)
+    top-ranked variant   266 (PIP 0.969)  <- causal
     credible sets        [[266]]
 
   Annotation selection (the shared prior head)
     informative columns  [0, 1] of 0..9
-    their ranks          col 0: rank 2 of 10, col 1: rank 1 of 10
-    columns driven to exactly zero by the L1 penalty  6/10
-    informative columns in the top 2: 2/2 (expected 0.4 by chance)
+    their ranks          col 0: rank 2 of 10, col 1: rank 3 of 10
+    columns driven to exactly zero by the L1 penalty  2/10
+    informative columns in the top 2: 1/2 (expected 0.4 by chance)
 
   Overall
     causal variants ranked first in their region   3/9
@@ -119,18 +120,21 @@ contains a causal variant, and none is spurious. The causals that are missed —
 variant 5 in region 1, 210 in region 2 — are the ones with weak marginal signal,
 which is the expected failure mode, not a bug.
 
-**The shared prior recovers the annotations.** Pooling three regions puts both
-informative columns at ranks 1 and 2 of 10, against 0.4 expected by chance, and
-drops six of the ten entirely. The single-region run in step 2 found one of the
-two and could not separate the other from noise.
+**The shared prior does better on the annotations.** Pooling three regions lifts
+both informative columns into the top 3 of 10 and keeps two columns at exactly
+zero. The single-region run in step 2 ranked one of them below a noise column and
+dropped the other. Three regions is still very little evidence — the real gain
+shows up over hundreds of loci, not three.
 
 ## On `--lambda_l1`
 
-The example passes `--lambda_l1 0.2`, not the default `0.01`. That is deliberate:
-in a sweep of this penalty the shared head selected annotations **no better than
-chance at λ ≤ 0.06**, and selection was best in the range 0.12–0.25. The default
-is too weak to drive the skip connections to zero, so the prior uses all ten
-columns a little and identifies none of them. Try it and compare:
+`--lambda_l1` is the L1 penalty on the LassoNet skip connections, and it decides
+how many annotations the prior may use at all. It matters more than any other
+knob here, and the default (0.1223) is the value a sweep of this penalty found
+best over 500–2000 cells per stratum of a full benchmark.
+
+Below about 0.06 the shared head selects annotations **no better than chance**.
+Try it on this example:
 
 ```bash
 # Output paths come from the manifest, so this overwrites examples/results_joint.
@@ -140,10 +144,13 @@ python examples/check_results.py examples/results_joint
 ```
 
 At `--lambda_l1 0.01` the two informative columns come out at ranks 5 and 7 of
-10, with nothing driven to zero. Re-run step 3 to get the good run back.
+10, with nothing driven to zero. At `0.2` they come out 1st and 2nd with 6 of 10
+zeroed — better than the default *on this three-region toy*, which is a
+reminder that three regions is not enough to tune on. On the full benchmark
+0.1223 beat 0.25 in three of the four model-by-annotation strata.
 
-If you care about which annotations the prior used, tune this penalty. If you
-only care about the PIPs, it matters much less.
+Above about 0.5 average precision falls away in every stratum, so the penalty
+starts costing accuracy rather than buying interpretability.
 
 ## What each output file is
 
