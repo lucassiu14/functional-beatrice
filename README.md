@@ -46,8 +46,18 @@ If you use this, cite the original BEATRICE paper as well:
 
 ## Requirements
 
-Python with PyTorch, NumPy, SciPy, pandas and `absl-py`. A GPU is optional —
-the models run on CPU, and `scripts/device.py` handles placement.
+See `requirements.txt`: PyTorch, NumPy, pandas, `absl-py`, and — because the
+single-locus trainer imports them unconditionally for its loss plots —
+matplotlib, seaborn, imageio and tqdm. A GPU is optional; the models run on
+CPU, and `scripts/device.py` handles placement.
+
+```bash
+pip install -r requirements.txt
+```
+
+The `--z` / `--LD` / `--annot` flags default to paths under `example_data/`,
+which is not in this repository, so pass your own files rather than relying on
+the defaults.
 
 ## Running one locus
 
