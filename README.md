@@ -31,11 +31,12 @@ configuration scoring and the credible-set construction are theirs. The
 annotation-conditioned prior, the LassoNet parameterisation and the
 cross-region joint trainer are the additions here.
 
-> **Before this repository is made public, the upstream licence must be
-> established and included.** No `LICENSE` file was carried over from the fork
-> and none is present in this history. Check the terms upstream, add the
-> appropriate licence file and attribution notice, and make sure the additions
-> here are licensed compatibly.
+Upstream BEATRICE is MIT-licensed (Copyright (c) 2024 sayangsep). MIT requires
+that notice to travel with the code, so `LICENSE` here carries the upstream
+text verbatim with the original copyright line retained, plus a copyright line
+for the additions, which are released under the same MIT terms. The fork did
+not carry a `LICENSE` file across, so this one was reconstructed from the
+upstream repository rather than inherited through the history.
 
 If you use this, cite the original BEATRICE paper as well:
 
