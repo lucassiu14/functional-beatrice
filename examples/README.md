@@ -50,16 +50,19 @@ zeroes the other nine:
 ```
 Top 10 most important annotations:
  annotation_index  importance
-                4    0.030798
-                1    0.002380
-                0    0.000000
-                ...  0.000000
+                1    0.002334
+                3    0.001174
+                8    0.001050
+                6    0.000950
+                9    0.000918
+                ...
+                0    0.000601
 ```
 
-Column 1 is one of the two that really matter, but it is ranked below a noise
-column, and column 0 was dropped entirely. **That is the limitation this
-method's joint model exists to address**: one region contains three causal
-variants, which is not enough evidence to identify a genome-wide enrichment.
+Column 1, one of the two that really matter, comes out on top — but column 0 is
+8th of 10, below five noise columns. **That is the limitation this method's
+joint model exists to address**: one region contains three causal variants,
+which is not enough evidence to identify a genome-wide quantity.
 
 ## 3. All three loci, one shared prior
 
@@ -83,48 +86,49 @@ python examples/check_results.py examples/results_joint
 ```
   region1
     causal variants      [5, 72, 74]
-    their PIPs           5:0.005 (rank 67), 72:0.101 (rank 2), 74:0.540 (rank 1)
-    top-ranked variant   74 (PIP 0.540)  <- causal
+    their PIPs           5:0.003 (rank 212), 72:0.063 (rank 2), 74:0.519 (rank 1)
+    top-ranked variant   74 (PIP 0.519)  <- causal
     credible sets        [[74, 72]]
     causal variants captured by a set  2/3
 
   region2
     causal variants      [30, 151, 210]
-    their PIPs           30:0.961 (rank 1), 151:0.192 (rank 2), 210:0.002 (rank 285)
-    top-ranked variant   30 (PIP 0.961)  <- causal
+    their PIPs           30:0.942 (rank 1), 151:0.132 (rank 2), 210:0.002 (rank 247)
+    top-ranked variant   30 (PIP 0.942)  <- causal
     credible sets        [[30]]
 
   region3
     causal variants      [89, 251, 266]
-    their PIPs           89:0.048 (rank 4), 251:0.178 (rank 2), 266:0.969 (rank 1)
-    top-ranked variant   266 (PIP 0.969)  <- causal
-    credible sets        [[266]]
+    their PIPs           89:0.026 (rank 8), 251:0.118 (rank 2), 266:0.944 (rank 1)
+    top-ranked variant   266 (PIP 0.944)  <- causal
+    credible sets        [[266, 251]]
 
   Annotation selection (the shared prior head)
     informative columns  [0, 1] of 0..9
     their ranks          col 0: rank 2 of 10, col 1: rank 3 of 10
-    columns driven to exactly zero by the L1 penalty  2/10
+    columns driven to exactly zero by the L1 penalty  0/10
     informative columns in the top 2: 1/2 (expected 0.4 by chance)
 
   Overall
     causal variants ranked first in their region   3/9
-    ranked in the top 5                            7/9
+    ranked in the top 5                            6/9
     median rank of a causal variant (of 300)       2
 ```
 
 Two things to take from this.
 
-**The fine-mapping works.** Each region's top-ranked variant is genuinely causal,
-and the median causal variant ranks 2nd of 300. Every credible set reported
-contains a causal variant, and none is spurious. The causals that are missed —
-variant 5 in region 1, 210 in region 2 — are the ones with weak marginal signal,
-which is the expected failure mode, not a bug.
+**The fine-mapping works.** Each region's top-ranked variant is genuinely
+causal, and the median causal variant ranks 2nd of 300. Every credible set
+reported contains a causal variant, and none is spurious. The causals that are
+missed — variant 5 in region 1, 210 in region 2 — are the ones with weak
+marginal signal, which is the expected failure mode, not a bug.
 
-**The shared prior does better on the annotations.** Pooling three regions lifts
-both informative columns into the top 3 of 10 and keeps two columns at exactly
-zero. The single-region run in step 2 ranked one of them below a noise column and
-dropped the other. Three regions is still very little evidence — the real gain
-shows up over hundreds of loci, not three.
+**The shared prior does better on the annotations.** Pooling three regions puts
+both informative columns in the top 3 of 10; the single-region run in step 2 had
+one of them 8th, below five noise columns. Nothing is driven to exactly zero
+here — with ten annotations and three regions the penalty has little to work
+with. Three regions is very little evidence, and the real gain shows up over
+hundreds of loci.
 
 ## On `--lambda_l1`
 
@@ -143,11 +147,23 @@ python beatrice_joint.py --manifest examples/data/manifest.tsv \
 python examples/check_results.py examples/results_joint
 ```
 
-At `--lambda_l1 0.01` the two informative columns come out at ranks 5 and 7 of
-10, with nothing driven to zero. At `0.2` they come out 1st and 2nd with 6 of 10
-zeroed — better than the default *on this three-region toy*, which is a
-reminder that three regions is not enough to tune on. On the full benchmark
-0.1223 beat 0.25 in three of the four model-by-annotation strata.
+Sweeping it on this example, with everything else at its default:
+
+| `--lambda_l1` | informative columns 0 and 1 | zeroed |
+|---|---|---|
+| 0.01 | ranks **7** and **9** of 10 | 0/10 |
+| **0.1223** (default) | ranks **2** and **3** | 0/10 |
+| 0.2 | ranks 1 and 5 | 1/10 |
+| 0.5 | ranks 2 and 1 | 3/10 |
+
+At 0.01 the informative columns sit below most of the noise — worse than
+chance. The default puts both in the top 3.
+
+On this three-region toy the larger penalties look at least as good, which is a
+reminder that three regions is not enough to tune on: on the full benchmark
+0.1223 had the highest average precision in three of the four
+model-by-annotation strata, 0.5 lost 0.021-0.025 against it, and above 0.5
+accuracy falls away everywhere.
 
 Above about 0.5 average precision falls away in every stratum, so the penalty
 starts costing accuracy rather than buying interpretability.

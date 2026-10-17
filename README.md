@@ -60,6 +60,20 @@ The `--z` / `--LD` / `--annot` flags default to paths under `example_data/`,
 which is not in this repository, so pass your own files rather than relying on
 the defaults.
 
+## Default hyperparameters
+
+`n_caus`, `sigma_sq`, `sparse_concrete`, `prior_regularisation` and
+`hierarchy_M` default to a tuned configuration: trial 401 of an Optuna study on
+simulated fine-mapping data, chosen from 962 completed trials as the highest
+average precision among those reaching a defensible posterior-mass ratio.
+`lambda_l1` comes from a later sweep of that penalty alone. Every trial ran at
+`--max_iter 2000`, so the values are optimal for that budget.
+
+They were selected on simulated data with in-sample LD, so treat them as a
+starting point rather than as universal — on real data, and especially on a
+locus whose likely causal count differs from `n_caus`, they are worth
+revisiting.
+
 ## Quickstart
 
 [`examples/README.md`](examples/README.md) is a complete worked run on simulated
@@ -86,8 +100,7 @@ per-variant annotation matrix. Results are written to `--target`: posterior
 inclusion probabilities, and credible sets when `--get_cred` is set.
 
 The prior is controlled by `--lambda_l1` (the L1 penalty on the skip
-connections, which decides how many annotations the prior may use; the default
-0.1223 is the best value from a sweep, see
+connections, which decides how many annotations the prior may use; see
 [`examples/README.md`](examples/README.md#on---lambda_l1)),
 `--hierarchy_M` (how much non-linearity an annotation is allowed relative to
 its linear effect) and `--prior_neural_network` (the hidden layer widths).

@@ -6,6 +6,16 @@ import torch
 import random
 FLAGS = flags.FLAGS
 
+# Defaults below (n_caus, sigma_sq, sparse_concrete, prior_regularisation,
+# lambda_l1, hierarchy_M) are a tuned configuration: trial 401 of an Optuna
+# study on simulated fine-mapping data, chosen from 962 trials as the
+# highest-AP configuration among those reaching a defensible posterior-mass
+# ratio, with lambda_l1 taken from a later sweep of that penalty alone. Every
+# trial ran at max_iter 2000, so the values are optimal for that budget.
+#
+# They were selected on simulated data with in-sample LD. Treat them as a
+# starting point, not as universal - on real data, and especially where the
+# locus's likely causal count differs from n_caus, they are worth revisiting.
 #  Define Flagg names for inputs.
 flags.DEFINE_string('z', 'example_data/Simulation_data0.z', 'Location of Z Score')
 flags.DEFINE_string('target', 'results', 'Location to store results.')
@@ -22,15 +32,19 @@ flags.DEFINE_float('gamma', 0.1, 'Threshold to create the reduced space of binar
 flags.DEFINE_float('gamma_key', 0.2, 'Threshold for key variants.')
 flags.DEFINE_float('gamma_coverage', 0.95, 'Threshold for coverage.')
 flags.DEFINE_float('gamma_selection', 0.05, 'Threshold for selection probability within a credible set.')
-flags.DEFINE_float('sigma_sq', 0.05, 'Variance of causal variants')
+flags.DEFINE_float('sigma_sq', 0.0899, 'Variance of causal variants')
 flags.DEFINE_float('temp_lower_bound', 0.01, 'Extent of continuous relaxations', lower_bound=0.005)
-flags.DEFINE_integer('sparse_concrete', 50, 'Number of non zero locatons of the concrete random vector at every iteration.', lower_bound=1)
-flags.DEFINE_integer('n_caus', 20, 'Number of causal variants', lower_bound=1)
+flags.DEFINE_integer('sparse_concrete', 51,
+    'Number of non-zero locations of the concrete random vector at every '
+    'iteration. This is a likelihood truncation, not a prior, so it trades '
+    'bias against cost; average precision saturates by about 40.',
+    lower_bound=1)
+flags.DEFINE_integer('n_caus', 10, 'Expected maximum number of causal variants', lower_bound=1)
 flags.DEFINE_list('true_loc', '', 'Index of true causal variants.')
 flags.DEFINE_float('purity', 0, 'Purity')
 flags.DEFINE_list('neural_network', '10,200,10', 'Size of 3-layer neural network. First layer has 10 nodes, second layer has 200 nodes and third has 10 nodes')
 flags.DEFINE_list('prior_neural_network', '10,200,10', 'Size of 3-layer prior neural network. First layer has 10 nodes, second layer has 200 nodes and third has 10 nodes')
-flags.DEFINE_float('prior_regularisation', 1.0, 'Size of L2 regularisation for prior neural network.')
+flags.DEFINE_float('prior_regularisation', 0.1255, 'Size of L2 regularisation for prior neural network.')
 flags.DEFINE_string('prior_weights', '',
     'Path to pre-trained prior network weights file (.pt) to initialize from. '
     'Use this to continue training from a previous run. The weights file must have '
@@ -47,7 +61,7 @@ flags.DEFINE_float('lambda_l1', 0.1223,
     'default is the value a sweep of this penalty found best; below ~0.06 the '
     'prior selects annotations no better than chance, and above ~0.5 average '
     'precision falls away. Useful range: 0.03-0.5.')
-flags.DEFINE_float('hierarchy_M', 10.0,
+flags.DEFINE_float('hierarchy_M', 10.15,
     'Hierarchy constraint multiplier for LassoNet. Controls how much hidden layer '
     'weights can exceed skip connection weights. ||W^(1)_j|| <= M * |theta_j|. '
     'Higher M = looser constraint. Typical range: 1.0-100.0')
@@ -60,11 +74,11 @@ def run_beatrice_annot(beatrice_args: dict):
     defaults = {
         "neural_network": ['10', '200', '10'],
         "purity": 0.0,
-        "n_caus": 20,
+        "n_caus": 10,
         "allow_dup": False,
         "true_loc": [],
         "MCMC_samples": 1,
-        "sigma_sq": 0.05,
+        "sigma_sq": 0.0899,
         "max_iter": 2000,
         "temp_lower_bound": 0.01,
         "prior_location": '',
@@ -73,15 +87,15 @@ def run_beatrice_annot(beatrice_args: dict):
         "gamma_selection": 0.05,
         "gamma_key": 0.2,
         "get_cred": True,
-        "sparse_concrete": 50,
+        "sparse_concrete": 51,
         "gamma": 0.1,
         "annot": None, # defaults to None (not provided)
         "prior_neural_network": ['10', '200', '10'],
-        "prior_regularisation": 1.0,
+        "prior_regularisation": 0.1255,
         "prior_weights": '',
         "return_weights": False,
         "lambda_l1": 0.1223,
-        "hierarchy_M": 10.0
+        "hierarchy_M": 10.15
         }
 
     # Merge user args with defaults
