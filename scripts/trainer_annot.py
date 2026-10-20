@@ -66,13 +66,43 @@ def regularize_ld(LD):
         return LD
     except np.linalg.LinAlgError:
         pass
-    s = np.linalg.eigvalsh(_A)      # only reached when a shift is actually due
-    s_new = torch.zeros(len(s))
-    if min(s)<10**-3:
-        s_new = torch.ones(len(s))*(min(s)-10**-3)
-        print("\n Adding a constant {} to regularize LD".format(-min(s)+10**-3))
-    LD = LD - gpu(torch.diag(s_new))
-    return LD
+
+    # Only reached when the matrix is not positive definite, which on real
+    # reference LD is always: the UKBB panels are float32 and computed on a
+    # different sample, so min(eig) runs -0.017 to -0.069 across LDetect
+    # blocks. Simulated LD is PD (min(eig) ~ +0.042) and takes the fast path
+    # above, untouched.
+    #
+    # Project onto the nearest PD CORRELATION matrix - clip the eigenvalues
+    # and renormalise the diagonal back to one - rather than adding
+    # (1e-3 - min(eig)) to the diagonal as this used to.
+    #
+    # The diagonal shift leaves the off-diagonals alone while inflating the
+    # diagonal, so every implied correlation is scaled by 1/(1 + c). At
+    # c = 0.0703 that turned r = 0.996 into 0.931, and the approximate Bayes
+    # factor has a crossover near r = 0.955: above it, including two
+    # collinear variants together is penalised (-11.1 nats at r = 0.996);
+    # below it, FAVOURED (+8.2 nats at r = 0.931). The shift therefore pushed
+    # every strongly-correlated pair across that line - 100% of sampled pairs
+    # with raw |r| > 0.955 on one block - and the posterior then preferred to
+    # include both members of a perfectly-tagged pair. Measured consequence:
+    # sum(PIP) of 1.97 over four variants at r > 0.99, where a coherent
+    # posterior can spend at most about 1.
+    #
+    # Clipping preserves the structure instead: on that block r went
+    # 0.9962 -> 0.9961 (against 0.9308 under the shift), max |change| in any
+    # correlation 0.0040 against 0.0657, and co-inclusion is penalised again.
+    # It costs an eigh plus two matmuls rather than eigvalsh - 59s against 43s
+    # at p = 8,161 - in a step that is already O(p^3).
+    A = _A.astype(np.float64)
+    s, Q = np.linalg.eigh(A)
+    A = (Q * np.clip(s, 10**-3, None)) @ Q.T
+    d = np.sqrt(np.diag(A))
+    A /= np.outer(d, d)
+    print("\n Projected LD onto the nearest PD correlation matrix "
+          "(min eigenvalue was {:.3e}, max |change| {:.4f})".format(
+              float(s.min()), float(np.abs(A - _A).max())))
+    return gpu(torch.from_numpy(A.astype(_A.dtype)))
 
 
 def reformat_memo(memo, p0):
