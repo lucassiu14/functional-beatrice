@@ -357,7 +357,9 @@ def main(options):
         Z, LD, S = options['Z_t'], options['LD_t'], options['S_t']
     else:
         Z  = gpu_t(pd.read_table(options['z'],  sep=' ', header=None).to_numpy()[:,1].astype(float))
-        LD = gpu_t(pd.read_table(options['LD'], sep=' ', header=None).to_numpy())
+        # .npy as well as whitespace text; see read_ld in joint_trainer.py for why
+        LD = gpu_t(np.load(options['LD']) if str(options['LD']).endswith('.npy')
+                   else pd.read_table(options['LD'], sep=' ', header=None).to_numpy())
         LD = regularize_ld(LD)
         # solve(A, b) rather than inverse(A) @ b: same result, ~3x fewer flops
         # and better conditioned.

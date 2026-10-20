@@ -234,7 +234,7 @@ def _load_region(z_path, ld_path, annot_path):
     Z = gpu_t(pd_read(z_path)[:, 1].astype(float))
     if torch.max(Z) == torch.inf:
         Z[torch.where(Z == torch.inf)[0]] = 200
-    LD = gpu_t(pd_read(ld_path))
+    LD = gpu(torch.from_numpy(read_ld(ld_path)))
     v = gpu_t(pd_read_annot(annot_path)[:, 1:].astype(float))
     if torch.max(v) == torch.inf:
         v[torch.where(v == torch.inf)[0]] = 200
@@ -249,6 +249,26 @@ def pd_read_col0(path):
     return pd.read_table(path, sep=' ', header=None).to_numpy()[:, 0]
 def pd_read_annot(path):
     return pd.read_table(path, sep=None, engine='python', header=None).to_numpy()
+
+
+def read_ld(path):
+    """Load an LD matrix, accepting .npy as well as whitespace text.
+
+    The text path is the original format and still works. It is, however,
+    unusable at scale: a block of p = 10,000 is an ~800 MB text file, and a
+    genome-wide run over ~250 blocks would spend longer parsing ASCII than
+    fitting the model. A float32 .npy of the same matrix is ~400 MB, memory-
+    maps, and loads in milliseconds. Values are identical; only the encoding
+    differs.
+
+    Returned as float32 and C-contiguous so the caller can wrap it with
+    torch.from_numpy directly. gpu_t() would be wrong here: it does
+    `torch.tensor(x.astype(float)).float()`, round-tripping through float64,
+    which transiently costs 4x the matrix for no benefit - about 1.6 GB for a
+    single p = 10,000 block.
+    """
+    a = np.load(path) if str(path).endswith('.npy') else pd_read(path)
+    return np.ascontiguousarray(a, dtype=np.float32)
 
 
 def run_joint(options):
