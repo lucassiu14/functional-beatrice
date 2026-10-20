@@ -47,7 +47,12 @@ def find_cond_prob_constrained_causal_no_dup(given, n_caus, M, bp, cred_set):
     cred = set(cred)
     total = 0
     ss = given[:]
-    p = np.array([0]*bp)
+    # float64, NOT np.array([0]*bp): that is int64, and these accumulate
+    # unnormalised Bayes factors. Adding a float to an int64 array silently
+    # truncates it (so a BF below 1 becomes 0), and a value past int64
+    # raises OverflowError - which is what a larger sparse_concrete does,
+    # because it explores more configurations and pushes the memo higher.
+    p = np.zeros(bp, dtype=np.float64)
 
     for k in M:
         tag = True
@@ -70,7 +75,12 @@ def find_cond_prob_constrained_causal(given, n_caus, M, bp):
 
     total = 0
     ss = given[:]
-    p = np.array([0]*bp)
+    # float64, NOT np.array([0]*bp): that is int64, and these accumulate
+    # unnormalised Bayes factors. Adding a float to an int64 array silently
+    # truncates it (so a BF below 1 becomes 0), and a value past int64
+    # raises OverflowError - which is what a larger sparse_concrete does,
+    # because it explores more configurations and pushes the memo higher.
+    p = np.zeros(bp, dtype=np.float64)
 
     for k in M:
             if all([s in k for s in ss]):
@@ -347,7 +357,9 @@ def main(options):
         Z, LD, S = options['Z_t'], options['LD_t'], options['S_t']
     else:
         Z  = gpu_t(pd.read_table(options['z'],  sep=' ', header=None).to_numpy()[:,1].astype(float))
-        LD = gpu_t(pd.read_table(options['LD'], sep=' ', header=None).to_numpy())
+        # .npy as well as whitespace text; see read_ld in joint_trainer.py for why
+        LD = gpu_t(np.load(options['LD']) if str(options['LD']).endswith('.npy')
+                   else pd.read_table(options['LD'], sep=' ', header=None).to_numpy())
         LD = regularize_ld(LD)
         # solve(A, b) rather than inverse(A) @ b: same result, ~3x fewer flops
         # and better conditioned.
@@ -381,15 +393,22 @@ def main(options):
         add(m, mean_memo, Z, LD, n_sub, sigma_sq, p0, S,ss, range(bp))
 
     #########################################################################################################################################################
+    # PIPs are computed and written BEFORE the credible-set search, for two
+    # reasons. (1) find_credible_set can fail - at a large sparse_concrete it
+    # overflowed - and the PIPs are the expensive part to recompute, so losing
+    # them to a crash in machinery the caller may not even want is wrong.
+    # (2) It keeps pip.csv holding the same quantity whether or not sets are
+    # built. Set `options['skip_cred_sets']` to stop here.
+    pip = calculate_pip(m, bp)
+    df = pd.DataFrame({'variant_index': list(range(bp)), 'pip': pip,
+                       'variant_names': options['names']})
+    df.to_csv(os.path.join(options['target'], 'pip.csv'), index=False)
+    if options.get('skip_cred_sets', False):
+        return
+
     ths = options['coverage_ths']
     prob_ths = options['selection_prob']
     cred_set, cred_prob = find_credible_set(LD, m, start_set, bp, ths, prob_ths, allow_dup, options)
-
-    pip = calculate_pip(m, bp)
-
-    df = {'variant_index':list(range(bp)),'pip':pip, 'variant_names':options['names']}
-    df = pd.DataFrame(df)
-    df.to_csv(os.path.join(options['target'],'pip.csv'), index=False)
 
     cred_str = []
     for item in cred_set:

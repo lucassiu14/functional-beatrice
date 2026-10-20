@@ -76,12 +76,29 @@ def regularize_ld(LD):
 
 
 def reformat_memo(memo, p0):
+    """Exponentiate the log-Bayes-factors held in `memo`, in place.
+
+    The offset MUST be the maximum log-BF, not the mean (the log-sum-exp
+    trick). Subtracting the mean leaves every above-average configuration
+    positive, so anything above mean + log(1e15) = mean + 34.54 saturated the
+    clamp. On real loci the log-BFs span ~900 nats, so 27-53% of the memo hit
+    the cap and became the IDENTICAL value - and because the offset is the
+    mean, the saturated group is exactly the top half. calculate_pip then
+    normalises a set of equal weights, which makes the PIP a count of visited
+    configurations rather than a posterior: max PIP collapsed to ~1/n_configs
+    (0.02-0.05 at p~8,600) and no PIP ever reached gamma_key, so no credible
+    set was formed.
+
+    Subtracting the max puts every weight in (0, 1], cannot saturate, and is
+    algebraically identical because calculate_pip normalises by the total - any
+    constant offset cancels in the ratio. The clamp is kept as an unreachable
+    guard.
+    """
     memo[tuple([])] = float(torch.sum(torch.log(1 - p0)).item())
-    m0 = float(np.mean([float(np.asarray(val).squeeze()) for val in memo.values()]))
+    m0 = max(float(np.asarray(val).squeeze()) for val in memo.values())
     for key in memo:
         val = float(np.asarray(memo[key]).squeeze())
-        memo[key] = float(min(10**15, np.exp(min(np.log(10**15), val - m0))))
-    return m0
+        memo[key] = float(np.exp(min(np.log(10**15), val - m0)))
     return m0
 
 class network(nn.Module):
@@ -983,6 +1000,7 @@ def main(options):
             if options['annot_given']:
                 _, _, _, p_0 = prior_network(v, temp, 1)
             mean_memo = reformat_memo(memo, p_0)
+            pip = calculate_pip(memo, bp)
             if options['annot_given']:
                 # Include feature importance from LassoNet
                 feature_importance = prior_network.feature_importance
@@ -994,6 +1012,9 @@ def main(options):
                     'reg_loss': Loss_reg,
                     'imp': F_map.model.imp,
                     'loc': loc,
+                    # computed just above: it used to be inserted here while
+                    # still np.zeros, because calculate_pip rebinds the name
+                    # instead of mutating the array, so res['pip'] was always 0.
                     'pip': pip,
                     'memo': memo,
                     'mean_memo': mean_memo,
@@ -1001,7 +1022,6 @@ def main(options):
                 }
             else:
                 res_to_save={'loss':Loss,'lik_loss':Loss_lik,'kl_loss':Loss_kl, 'imp':F_map.model.imp,'loc':loc, 'pip':pip,'memo':memo, 'mean_memo':mean_memo}
-            pip = calculate_pip(memo, bp)
             save_object(res_to_save, os.path.join(options['target'],'res'))
 
 
