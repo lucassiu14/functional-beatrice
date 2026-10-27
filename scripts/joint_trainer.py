@@ -412,6 +412,10 @@ def run_joint(options):
             # LD matrix, a second eigendecomposition and a second m_r x m_r
             # solve, per region.
             'Z_t': r['Z'], 'LD_t': r['LD'], 'S_t': r['S'],
+            # The SAME p_0 the training memo was scored and normalised
+            # with. Without it generate_credible_sets falls back to a
+            # uniform prior and the annotations never reach the PIPs.
+            'p0_t': p_0,
             'n_causal': options['n_causal'], 'allow_duplicates': options['allow_duplicates'],
             'coverage_ths': options['coverage_ths'], 'selection_prob': options['selection_prob'],
             'purity': options.get('purity', 0.0),

@@ -9,6 +9,7 @@ from scripts.convert_to_gpu import gpu
 from scripts.convert_to_gpu_and_tensor import gpu_t
 from scripts.convert_to_gpu_scalar import gpu_ts
 from scripts.convert_to_cpu import cpu
+from scripts.ld_regularisation import regularize_ld
 import os
 
 matplotlib.use('Agg')
@@ -301,61 +302,6 @@ def calculate_pip(memo,bp):
     return np.squeeze(pip/tot)
 
 
-def regularize_ld(LD):
-    LD = (LD + LD.T)/2
-    # The ONLY thing used from the spectrum is whether min(eig) < 1e-3 and, if
-    # so, its value. A - 1e-3*I is positive definite EXACTLY when
-    # min(eig) > 1e-3, and Cholesky settles that far faster than any
-    # eigendecomposition: at m_r = 2000, 0.022s against 0.273s for eigvalsh and
-    # 172.6s for the np.linalg.eig this originally called (measured on a CX3
-    # core). For LD built from a few thousand samples the fast path is the
-    # common one - no shift is needed at all - so the eigendecomposition is
-    # skipped entirely. Identical result: the old code subtracted a zero
-    # diagonal in that case, which is exact.
-    _A = cpu(LD).data.numpy()
-    try:
-        np.linalg.cholesky(_A - (10**-3) * np.eye(_A.shape[0], dtype=_A.dtype))
-        return LD
-    except np.linalg.LinAlgError:
-        pass
-
-    # Only reached when the matrix is not positive definite, which on real
-    # reference LD is always: the UKBB panels are float32 and computed on a
-    # different sample, so min(eig) runs -0.017 to -0.069 across LDetect
-    # blocks. Simulated LD is PD (min(eig) ~ +0.042) and takes the fast path
-    # above, untouched.
-    #
-    # Project onto the nearest PD CORRELATION matrix - clip the eigenvalues
-    # and renormalise the diagonal back to one - rather than adding
-    # (1e-3 - min(eig)) to the diagonal as this used to.
-    #
-    # The diagonal shift leaves the off-diagonals alone while inflating the
-    # diagonal, so every implied correlation is scaled by 1/(1 + c). At
-    # c = 0.0703 that turned r = 0.996 into 0.931, and the approximate Bayes
-    # factor has a crossover near r = 0.955: above it, including two
-    # collinear variants together is penalised (-11.1 nats at r = 0.996);
-    # below it, FAVOURED (+8.2 nats at r = 0.931). The shift therefore pushed
-    # every strongly-correlated pair across that line - 100% of sampled pairs
-    # with raw |r| > 0.955 on one block - and the posterior then preferred to
-    # include both members of a perfectly-tagged pair. Measured consequence:
-    # sum(PIP) of 1.97 over four variants at r > 0.99, where a coherent
-    # posterior can spend at most about 1.
-    #
-    # Clipping preserves the structure instead: on that block r went
-    # 0.9962 -> 0.9961 (against 0.9308 under the shift), max |change| in any
-    # correlation 0.0040 against 0.0657, and co-inclusion is penalised again.
-    # It costs an eigh plus two matmuls rather than eigvalsh - 59s against 43s
-    # at p = 8,161 - in a step that is already O(p^3).
-    A = _A.astype(np.float64)
-    s, Q = np.linalg.eigh(A)
-    A = (Q * np.clip(s, 10**-3, None)) @ Q.T
-    d = np.sqrt(np.diag(A))
-    A /= np.outer(d, d)
-    print("\n Projected LD onto the nearest PD correlation matrix "
-          "(min eigenvalue was {:.3e}, max |change| {:.4f})".format(
-              float(s.min()), float(np.abs(A - _A).max())))
-    return gpu(torch.from_numpy(A.astype(_A.dtype)))
-
 
 def unique_sets(cred_set, cred_prob):
     D = []
@@ -394,11 +340,30 @@ def main(options):
         # solve(A, b) rather than inverse(A) @ b: same result, ~3x fewer flops
         # and better conditioned.
         S = torch.linalg.solve(LD, Z.unsqueeze(1))
-    try:
-        prior_loc = options['prior_location']
-        p0 = gpu_t(pd.read_table(prior_loc,  sep=' ', header=None).to_numpy()[:,1].astype(float))
-
-    except:
+    # The learned per-variant prior, when the caller holds it. The joint
+    # trainer evaluates its shared prior head to get p_0, scores every
+    # TRAINING configuration with it and normalises the memo by it
+    # (reformat_memo), so the sweep must score with the SAME p_0. Otherwise
+    # the two halves of one memo sit on different scales and calculate_pip
+    # normalises them together: measured on UKBB cholesterol ldEUR_08_0045 the
+    # gap was 96.09 nats, +2.67 per variant, systematically favouring whatever
+    # training produced.
+    #
+    # Worse, `prior_location` is '' on every path that reaches here -
+    # joint_trainer passes it literally, and beatrice_annot/beatrice_joint
+    # both default it to '' - so the bare `except` this replaces turned every
+    # run into a UNIFORM prior, and the learned annotation prior never reached
+    # a single reported PIP. In the 232 of 254 regions where the sweep's
+    # configurations hold the posterior mass, the published PIPs were
+    # annotation-free.
+    if options.get('p0_t') is not None:
+        p0 = options['p0_t']
+    elif options.get('prior_location'):
+        # A path was given, so failing to read it is an error. Falling back to
+        # uniform here is precisely what hid the bug above for months.
+        p0 = gpu_t(pd.read_table(options['prior_location'], sep=' ',
+                                 header=None).to_numpy()[:, 1].astype(float))
+    else:
         p0 = gpu_t(np.array([1/len(Z)]*len(Z)))
 
     sigma_sq =  gpu_ts(options['sigma_sq'])
