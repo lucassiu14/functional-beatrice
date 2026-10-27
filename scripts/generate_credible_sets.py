@@ -340,6 +340,7 @@ def main(options):
         # solve(A, b) rather than inverse(A) @ b: same result, ~3x fewer flops
         # and better conditioned.
         S = torch.linalg.solve(LD, Z.unsqueeze(1))
+    bp = len(Z)
     # The learned per-variant prior, when the caller holds it. The joint
     # trainer evaluates its shared prior head to get p_0, scores every
     # TRAINING configuration with it and normalises the memo by it
@@ -358,6 +359,21 @@ def main(options):
     # annotation-free.
     if options.get('p0_t') is not None:
         p0 = options['p0_t']
+        # Fail fast and say which prior is in force. A 21 h run that silently
+        # used the wrong prior is the failure mode this whole fix is about, so
+        # the log must record it. reshape rather than assert on the shape:
+        # trainer_annot's abf does the same `prior[ind] = p0[ind]` and already
+        # works with whatever the prior head returns, so a stricter check here
+        # could reject a run that would have been fine.
+        if p0.numel() != bp:
+            raise ValueError(f"p0_t has {p0.numel()} entries for {bp} variants")
+        p0 = p0.reshape(-1)
+        _lo, _hi = float(p0.min()), float(p0.max())
+        if not (0.0 < _lo and _hi < 1.0):
+            raise ValueError(f"p0_t outside (0,1): min {_lo:.3e} max {_hi:.3e}")
+        print("\n Prior: the caller's LEARNED per-variant p0 "
+              "(min {:.3e}, median {:.3e}, max {:.3e}, uniform would be {:.3e})"
+              .format(_lo, float(p0.median()), _hi, 1.0/bp))
     elif options.get('prior_location'):
         # A path was given, so failing to read it is an error. Falling back to
         # uniform here is precisely what hid the bug above for months.
@@ -365,9 +381,10 @@ def main(options):
                                  header=None).to_numpy()[:, 1].astype(float))
     else:
         p0 = gpu_t(np.array([1/len(Z)]*len(Z)))
+        print("\n Prior: UNIFORM 1/{} - no p0_t and no prior_location. The "
+              "learned annotation prior is NOT in use.".format(bp))
 
     sigma_sq =  gpu_ts(options['sigma_sq'])
-    bp = len(Z)
     m  = load_object(os.path.join(options['target'],'res'))['memo']
     mean_memo = load_object(os.path.join(options['target'],'res'))['mean_memo']
 
